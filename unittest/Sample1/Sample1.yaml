@@ -1,0 +1,16 @@
+---
+given:
+- path: "sqCustomer-source.csv"
+  stage: "sqCustomer"
+  link: "source"
+when:
+  job: "Sample1"
+  controller: null
+  parameters:
+    psGlobal: ""
+then:
+- path: "dsCustomer-target.csv"
+  stage: "dsCustomer"
+  link: "target"
+  cluster: null
+  ignore: null

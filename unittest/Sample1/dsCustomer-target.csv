@@ -1,0 +1,145 @@
+account_number|int32,customer_fname|ustring(255),customer_lname|ustring(255),city|ustring(255),state|ustring(255),zip_code|int32,phone_number|ustring(255)
+1005985951,Henry,Conway,"San Antonio",TX,54016,"210-313-9074"
+1022497789,Lee,Harvey,"San Diego",CA,27767,"619-265-7835"
+1032139420,Christian,Jennings,"Los Angeles",CA,88481,"213-357-2527"
+1040681821,Teresa,Oconnell,"Los Angeles",CA,65843,"213-275-9113"
+1059051679,Adam,Shaffer,Philadelphia,PA,41432,"215-365-2201"
+1077528929,Bethany,Ruiz,Philadelphia,PA,43795,"215-277-6681"
+1110602352,Manuel,Delacruz,"New York",NY,28968,"212-700-2569"
+1115013305,Gilbert,Larson,"New York",NY,99067,"212-815-7011"
+1131990004,Holly,Hartman,"San Diego",CA,19023,"619-454-9452"
+1140757901,Christian,Moore,"San Diego",CA,59712,"619-954-5712"
+1144806405,Christine,Bowers,"San Jose",CA,39183,"408-972-4368"
+1161542008,Gregory,Baxter,"Los Angeles",CA,21151,"213-567-5374"
+1168403561,Ellen,Kerr,"San Antonio",TX,49960,"210-448-9285"
+1195942409,Natasha,Schmitt,"New York",NY,17143,"212-528-5334"
+1210731206,Brian,Beasley,"San Jose",CA,68045,"408-747-8921"
+1214268370,Jasmine,Berry,Philadelphia,PA,47225,"215-616-6751"
+1232231422,Norman,French,"Los Angeles",CA,47767,"213-309-1362"
+1256426301,Mitchell,Chang,Phoenix,AZ,70400,"602-252-5424"
+1261879291,Jessica,Carlson,Dallas,TX,86100,"214-222-5589"
+1270539726,Judy,Fisher,"San Jose",CA,42888,"408-322-9360"
+1302507821,Fernando,Townsend,"New York",NY,21309,"212-670-4860"
+1334047923,Gregory,Osborne,Phoenix,AZ,48785,"602-766-8733"
+1349875172,Donald,Cross,Chicago,IL,65951,"312-797-5326"
+1367321647,Misty,Espinoza,"San Diego",CA,30095,"619-869-8002"
+1372733969,April,Garner,Philadelphia,PA,94400,"215-870-6865"
+1386222920,Karla,Middleton,Houston,TX,18909,"713-253-8401"
+1402951445,Clinton,Schwartz,Phoenix,AZ,63750,"602-468-5209"
+1420039696,Tyrone,Nolan,Dallas,TX,87456,"214-499-5159"
+1435860674,Colin,Doyle,"New York",NY,34402,"212-565-8390"
+1460522437,Diana,Green,"New York",NY,82925,"212-289-2859"
+1464336496,Frederick,Delacruz,Philadelphia,PA,50432,"215-941-8916"
+1478399010,Jenna,Harding,"San Jose",CA,52048,"408-964-4326"
+1507279618,Debbie,Bates,Houston,TX,15221,"713-614-6153"
+1538751193,Rodney,Dunn,Phoenix,AZ,34369,"602-394-1641"
+1555737685,Billy,Garrison,"San Jose",CA,90839,"408-620-8860"
+1577128448,Diana,Thomas,Phoenix,AZ,68796,"602-756-2363"
+1592544432,Valerie,Wilcox,"San Antonio",TX,34452,"210-762-7084"
+1606736448,Nathan,Bryan,Philadelphia,PA,83616,"215-433-5047"
+1609455871,Rodney,Underwood,Phoenix,AZ,43170,"602-590-1447"
+1625874632,Loretta,Simon,"San Diego",CA,84159,"619-383-8098"
+1628111129,Tyler,Stevenson,Chicago,IL,66918,"312-505-1167"
+1640455399,Adrienne,Wong,Houston,TX,36014,"713-366-8945"
+1646750069,Mallory,Browning,"Los Angeles",CA,70287,"213-381-1791"
+1652952784,Sheryl,Lyons,Chicago,IL,25217,"312-352-8601"
+1684991524,Glen,Gonzalez,"San Diego",CA,70625,"619-327-2179"
+1690071314,Jack,Boone,Chicago,IL,42817,"312-725-8106"
+1706772602,Arthur,Pugh,"San Jose",CA,56674,"408-793-5711"
+1715617850,Levi,Grimes,"San Antonio",TX,46758,"210-882-2374"
+1742136921,Lindsay,Ferguson,"San Diego",CA,30752,"619-328-2521"
+1747797032,Ariel,Arnold,Houston,TX,81820,"713-758-4799"
+1753731402,Johnathan,Mclaughlin,"San Jose",CA,86066,"408-572-3793"
+1808573990,Kayla,Guzman,Philadelphia,PA,32754,"215-221-1004"
+1022189993,Beth,White,"San Diego",CA,39424,"619-447-4562"
+1031786127,Javier,Bowers,"Los Angeles",CA,19376,"213-201-7818"
+1037754911,Jasmin,Waters,"San Jose",CA,35787,"408-799-6358"
+1057734617,Roger,Bauer,"Los Angeles",CA,25778,"213-209-5838"
+1067174379,Patricia,Moss,Phoenix,AZ,85267,"602-926-5922"
+1098160164,Trevor,Mckee,"New York",NY,65587,"212-282-5412"
+1112458836,Jeff,Jensen,Dallas,TX,20154,"214-831-2262"
+1121942411,Brandy,Valentine,"San Jose",CA,46121,"408-543-8699"
+1135486158,Tonya,Parsons,"San Jose",CA,41405,"408-871-9729"
+1141251725,Wayne,Herring,"San Diego",CA,14524,"619-592-9720"
+1151106822,Ashley,Melton,Dallas,TX,63820,"214-831-1611"
+1167164503,Bonnie,Erickson,Dallas,TX,32019,"214-247-8773"
+1188186997,Johnny,Randolph,Chicago,IL,45372,"312-719-6162"
+1209261062,Eugene,Harper,Dallas,TX,40955,"214-247-9106"
+1212701571,Catherine,Perkins,"Los Angeles",CA,18855,"213-560-3212"
+1220655998,Albert,Case,"San Jose",CA,98886,"408-926-9812"
+1237568128,Mike,Mckay,"San Antonio",TX,83455,"210-542-1807"
+1257978665,Priscilla,Huff,"San Antonio",TX,14860,"210-916-4743"
+1263333272,Chloe,Hurst,Houston,TX,13219,"713-546-8395"
+1286552221,Troy,Fritz,Chicago,IL,23252,"312-628-1522"
+1304127754,Kiara,Ashley,Chicago,IL,65567,"312-221-5614"
+1345359663,Darius,Benitez,"New York",NY,83541,"212-975-7193"
+1351631197,Kendra,Waters,"Los Angeles",CA,27109,"213-742-9355"
+1371802108,Mercedes,Bush,"San Antonio",TX,66146,"210-296-4726"
+1379928134,Mandy,Farley,Dallas,TX,36150,"214-357-2664"
+1392420185,Sabrina,Roberts,Philadelphia,PA,38810,"215-379-2038"
+1419748409,Dominique,Benjamin,"San Jose",CA,69386,"408-340-2113"
+1427559356,Sheri,Perez,Chicago,IL,33754,"312-592-6724"
+1441511784,Nicholas,Arias,"San Antonio",TX,27758,"210-947-4149"
+1464318212,Deborah,Taylor,"San Jose",CA,83947,"408-305-4156"
+1469437351,Eileen,Graves,"San Antonio",TX,30546,"210-322-2894"
+1501136095,Dakota,Salas,"New York",NY,53433,"212-688-8531"
+1515007386,Ruth,Jensen,"Los Angeles",CA,93194,"213-765-5854"
+1550030073,Matthew,Mann,"San Jose",CA,38643,"408-750-7594"
+1555769951,Katie,Craig,Houston,TX,50093,"713-743-5130"
+1589659733,Malik,Marks,"New York",NY,92298,"212-396-6149"
+1592865889,Danielle,Compton,"San Diego",CA,75633,"619-534-1818"
+1607902843,Austin,Matthews,Chicago,IL,31899,"312-993-2539"
+1618296942,Loretta,Rice,"New York",NY,68798,"212-223-1725"
+1626942179,Sergio,Marquez,"San Jose",CA,59943,"408-524-4200"
+1630790039,Debbie,Savage,Houston,TX,93981,"713-436-7350"
+1643646334,Nichole,Green,Chicago,IL,97601,"312-568-9442"
+1648175270,Jeremy,Clayton,Dallas,TX,33891,"214-552-7382"
+1684814351,Melody,Young,"Los Angeles",CA,76918,"213-558-8107"
+1689118296,Perry,Trujillo,"New York",NY,42792,"212-805-3600"
+1700783186,Tom,Gardner,"San Diego",CA,61531,"619-642-2527"
+1708044723,Francis,Miller,"Los Angeles",CA,25508,"213-721-2483"
+1722448253,Sally,Hinton,"New York",NY,66238,"212-430-7162"
+1742144094,Bianca,Jennings,Dallas,TX,48452,"214-925-8234"
+1752907951,Fernando,Wade,"San Diego",CA,61919,"619-904-5816"
+1776927123,Ian,Krueger,"San Antonio",TX,78484,"210-431-5440"
+1812230821,Jeffrey,Waters,Houston,TX,31357,"713-653-8855"
+1822470899,Priscilla,Stuart,Houston,TX,27327,"713-887-5814"
+1849721268,Krista,Mcclure,"Los Angeles",CA,80306,"213-513-6923"
+1859430616,Kristi,Thompson,"San Antonio",TX,41411,"210-867-3808"
+1892246079,Peter,Glass,Dallas,TX,92965,"214-330-1761"
+1907040369,Tyrone,Marshall,"New York",NY,80064,"212-405-6259"
+1919451005,Tyrone,Hendrix,Dallas,TX,16481,"214-595-8098"
+1928604767,Nancy,Price,Phoenix,AZ,81239,"602-269-3341"
+1942017218,Christy,Franklin,Chicago,IL,50113,"312-675-1992"
+1978555218,Kelli,Gonzales,Phoenix,AZ,23287,"602-665-6125"
+1990465925,Caitlyn,Vazquez,"San Antonio",TX,44322,"210-877-2877"
+2001422233,Bridget,Molina,"San Antonio",TX,70223,"210-580-5234"
+2031136647,Brandi,Owens,"San Antonio",TX,11777,"210-260-7742"
+2054755684,Gilbert,Hendricks,Dallas,TX,36710,"214-376-5797"
+2065471697,Lauren,Montes,Phoenix,AZ,31042,"602-760-8671"
+2081445955,Grant,Mercado,"San Antonio",TX,59072,"210-522-7927"
+2086727978,Adam,Singh,Chicago,IL,48872,"312-887-5342"
+2101656505,Norman,Mclean,"Los Angeles",CA,41070,"213-535-9647"
+2108472633,Connie,Mercado,Dallas,TX,76905,"214-430-6929"
+2126473927,Victoria,Walter,"San Jose",CA,56809,"408-581-8971"
+2133411700,Teresa,Vargas,Philadelphia,PA,88461,"215-806-4994"
+1835546448,Tim,Hawkins,Houston,TX,35205,"713-214-6301"
+1850117947,Johnny,Harris,Chicago,IL,72782,"312-570-1256"
+1866915902,Autumn,Soto,Phoenix,AZ,36387,"602-628-1251"
+1904048836,Julie,Coffey,Chicago,IL,36059,"312-766-1296"
+1908658043,Frederick,Mcgrath,Houston,TX,76709,"713-728-5793"
+1919804664,Katelyn,Petersen,"Los Angeles",CA,96193,"213-490-6408"
+1928671856,Garrett,Villa,Philadelphia,PA,47673,"215-675-5540"
+1968935281,Kurt,Prince,"San Diego",CA,64781,"619-709-7914"
+1986640668,Jay,Hodge,"San Jose",CA,54113,"408-925-6620"
+1994737430,Michelle,Good,"Los Angeles",CA,69721,"213-628-8615"
+2022314679,Pam,Crane,"Los Angeles",CA,15700,"213-803-1279"
+2033720092,Anthony,Curtis,Houston,TX,57799,"713-893-7035"
+2055723994,Larry,Key,Dallas,TX,25633,"214-647-6121"
+2067684693,Beverly,Kirby,"San Jose",CA,75490,"408-922-2531"
+2082376173,Kristie,Oconnor,Houston,TX,88690,"713-332-6354"
+2100870190,Diamond,Barnett,Philadelphia,PA,39445,"215-907-3175"
+2103548187,Bobby,Mclean,Phoenix,AZ,76684,"602-871-7247"
+2110231035,Yvette,Mccoy,"San Antonio",TX,74571,"210-852-2957"
+2131364903,Benjamin,Galvan,"Los Angeles",CA,78063,"213-489-9014"
+2141394713,Daryl,Meza,Phoenix,AZ,14282,"602-626-4386"
