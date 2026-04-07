@@ -1,0 +1,239 @@
+name: MettleCI Deploy Template
+
+on:
+  workflow_call:
+    inputs:
+      RunOn:
+        required: true
+        type: string
+      EnvironmentName:
+        description: ''
+        required: true
+        type: string
+      EnvID:
+        required: true
+        type: string
+      UpdateDSParams:
+        description: 'True to update DSParams file'
+        required: false
+        type: boolean
+        default: false
+      IISDomainName:
+        description: ''
+        required: true
+        type: string
+      IISEngineName:
+        description: ''
+        required: true
+        type: string
+      DatastageProject:
+        description: ''
+        required: true
+        type: string
+      ProjectCacheDir:
+        description: ''
+        required: true
+        type: string
+      IISUsername:
+        description: ''
+        required: true
+        type: string
+      MCIUsername:
+        description: ''
+        required: true
+        type: string
+      PublishCompilationTests:
+        required: false
+        type: boolean
+        default: false
+      AgentMettleCmd:
+        required: true
+        type: string
+      ProjectTemplate:
+        description: 'Path of DataStage template project. Required if UpdateDSParams is set to true'
+        required: false
+        type: string
+        default: ''
+      PSSpecialHandling:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      IISPASSWORD:
+        description: 'The IIS user password'
+        required: true
+      MCIPASSWORD:
+        description: 'The MettleCI user password'
+        required: true
+
+permissions:
+  contents: read
+  checks: write
+
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+
+  # Diagnostics:
+  #   name: Diagnostics
+  #   # if: github.repository == 'abc/abc'
+  #   runs-on: ${{ fromJSON(inputs.RunOn) }}
+  #   steps:
+
+  #     # - name: Print GitHub context
+  #     #   env:
+  #     #     EVENT_CONTEXT: ${{ toJSON(github.event) }}
+  #     #   run: |
+  #     #     echo $EVENT_CONTEXT
+
+  #     - name: Print environment variables
+  #       run: |
+  #         echo "Github workspace directory: ${{ github.workspace }}" ^
+  #         echo "Environment: ${{ inputs.EnvironmentName }}" ^
+  #         echo "IISUsername: ${{ inputs.IISUsername }}" ^
+  #         echo "IISPassword: ${{ secrets.IISPASSWORD }}" ^
+  #         echo "IISDomainName: ${{ inputs.IISDomainName }}" ^
+  #         echo "IISEngineName: ${{ inputs.IISEngineName }}" ^
+  #         echo "EnvID: ${{ inputs.EnvID }}" ^
+  #         echo "DatastageProject: ${{ inputs.DatastageProject }}" ^
+  #         echo "ProjectCacheDir: ${{ inputs.ProjectCacheDir }}" ^
+  #         echo "IISUsername: ${{ inputs.IISUsername }}" ^
+  #         echo "IISPassword: ${{ secrets.IISPASSWORD }}" ^
+  #         echo "MCIUsername: ${{ inputs.MCIUSERNAME }}" ^
+  #         echo "MCIPassword: ${{ secrets.MCIPASSWORD }}" ^
+  #         echo "AgentMettleCmd: ${{ inputs.AgentMettleCmd }}" ^
+  #         echo "Done!"
+
+  DeployMettleCIProject: 
+    runs-on: ${{ fromJSON(inputs.RunOn) }}
+    environment: ${{ inputs.EnvironmentName }}
+    env:
+      DATASTAGE_PROJECT: ${{ inputs.DatastageProject }}
+      ENVID: ${{ inputs.EnvID }}
+      IISENGINENAME: ${{ inputs.IISEngineName }}
+      PSSPECIALHANDLING: ${{ inputs.PSSpecialHandling }}
+    steps:
+      # Use our DataStage repository
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Determine ParameterSet Special Handling
+        id: set-PSSpecialHandling
+        run: |
+          IF "%PSSPECIALHANDLING%"=="true" (
+            echo PSPropertiesConfig=-filePattern "Parameter Sets/*/*">> %GITHUB_OUTPUT%
+            echo PSDeploy=-parameter-sets "config\Parameter Sets">> %GITHUB_OUTPUT%
+          ) ELSE (
+            echo PSPropertiesConfig=>> %GITHUB_OUTPUT%
+            echo PSDeploy=>> %GITHUB_OUTPUT%
+          )
+
+      - name: Create Project
+        run: |
+          ${{ inputs.AgentMettleCmd }} datastage create-project ^
+            -domain ${{ inputs.IISDomainName }} ^
+            -username ${{ inputs.IISUsername }} ^
+            -password ${{ secrets.IISPASSWORD }} ^
+            -server ${{ inputs.IISEngineName }} ^
+            -project ${{ inputs.DatastageProject }}
+
+# ------------------------------------------------------------
+
+      - name: Fetch Template DSParams
+        if: ${{ inputs.UpdateDSParams }}
+        run: |
+          ${{ inputs.AgentMettleCmd }} remote download ^
+            -host ${{ inputs.IISEngineName }} ^
+            -username ${{ inputs.MCIUsername }} -password ${{ secrets.MCIPASSWORD }} ^
+            -source ${{ inputs.ProjectTemplate }}/ ^
+            -destination ${{ github.workspace }}/templates/ ^
+            -transferPattern "DSParams"
+
+      - name: Create artifacts dir
+        if: ${{ inputs.UpdateDSParams }}
+        run: |
+          cd ${{ github.workspace }}
+          if not exist artifacts mkdir artifacts
+
+
+      - name: Fetch diff
+        if: ${{ inputs.UpdateDSParams }}
+        uses: actions/download-artifact@v3
+        with:
+          name: DSParams.diff
+          path: |
+            ${{ github.workspace }}/artifacts/Diffs
+
+      - name: Generate merged DSParams
+        if: ${{ inputs.UpdateDSParams }}
+        id: GenerateDSParams
+        run: |
+              ${{ inputs.AgentMettleCmd }} dsparams merge ^
+                -before ${{ github.workspace }}/templates/DSParams ^
+                -after ${{ github.workspace }}/datastage/DSParams ^
+                -diff ${{ github.workspace }}/artifacts/Diffs/DSParams.diff  
+
+      - name: Configure Properties
+        run: |
+              ${{ inputs.AgentMettleCmd }} properties config ^
+                -baseDir ${{ github.workspace }}/datastage ^
+                -filePattern "*.apt" ^
+                -filePattern "*.sh" ^
+                -filePattern "DSParams" ^
+                ${{ steps.set-PSSpecialHandling.outputs.PSPropertiesConfig }} ^
+                -properties var.${{ inputs.EnvID }} ^
+                -outDir ${{ github.workspace }}/config
+
+      - name: Upload config files
+        run: |
+              ${{ inputs.AgentMettleCmd }} remote upload ^
+                -host ${{ inputs.IISEngineName }} ^
+                -username ${{ inputs.MCIUsername }} -password ${{ secrets.MCIPASSWORD }} ^
+                -source "${{ github.workspace }}/." ^
+                -destination ${{ inputs.DatastageProject }} ^
+                -transferPattern "filesystem/**/*,config/*"
+
+      - name: Cleanup
+        run: |
+              ${{ inputs.AgentMettleCmd }} remote execute ^
+                -host ${{ inputs.IISEngineName }} ^
+                -username ${{ inputs.MCIUsername }} -password ${{ secrets.MCIPASSWORD }} ^
+                -script ${{ github.workspace }}/config/cleanup.sh
+
+      - name: Execute deploy script
+        run: |
+              ${{ inputs.AgentMettleCmd }} remote execute ^
+                -host ${{ inputs.IISEngineName }} ^
+                -username ${{ inputs.MCIUsername }} -password ${{ secrets.MCIPASSWORD }} ^
+                -script ${{ github.workspace }}/config/deploy.sh
+
+      - name: Deploy DataStage assets
+        run: |
+              ${{ inputs.AgentMettleCmd }} datastage deploy ^
+                -domain ${{ inputs.IISDomainName }} ^
+                -server ${{ inputs.IISEngineName }} ^
+                -username ${{ inputs.IISUsername }} -password ${{ secrets.IISPASSWORD }} ^
+                -project ${{ inputs.DatastageProject }} ^
+                -project-cache ${{ inputs.ProjectCacheDir }} ^
+                ${{ steps.set-PSSpecialHandling.outputs.PSDeploy }} ^
+                -assets datastage ^
+                -threads 1 ^
+                -include-job-in-test-name
+
+      - name: Check For Test Results
+        id: set-fileExists
+        if: ${{ inputs.PublishCompilationTests }}
+        run: echo fileExists=Test-Path -Path "${{ github.workspace }}/log/**/mettleci_compilation.xml">> %GITHUB_OUTPUT%
+
+      - name: 'Publish compilation results'
+        if: (${{ inputs.PublishCompilationTests }} == true and ${{ steps.set-fileExists.outputs.fileExists }} == true)
+        uses: mikepenz/action-junit-report@v3
+        with:
+          report_paths: "${{ github.workspace }}/log/**/mettleci_compilation.xml"
+          require_tests: false
+          fail_on_failure: true
+          check_name: "Post-Deploy DataStage Compilation - ${{ inputs.EnvironmentName }}"
+          summary: true
+          token: ${{ github.token }}

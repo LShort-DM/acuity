@@ -1,0 +1,623 @@
+name: 'MettleCI Upgrade Workflow'
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  checks: write
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+  EnvSetupBase:
+    name: Publish Base Environment Vars for Workflow
+    runs-on: [self-hosted, Windows, MettleCI, DataStage11.5]
+    outputs:
+      var_BaseIISProjectName: ${{ steps.set-BaseIISProjectName.outputs.BaseIISProjectName }}
+      var_ComplianceRepo: ${{ steps.set-ComplianceRepo.outputs.ComplianceRepo }}
+      var_ComplianceFatalTags: ${{ steps.set-ComplianceFatalTags.outputs.ComplianceFatalTags }}
+      var_PSSpecialHandling: ${{ steps.set-PSSpecialHandling.outputs.PSSpecialHandling }}
+    steps:
+      - name: BaseIISProjectName
+        id: set-BaseIISProjectName
+        run: echo BaseIISProjectName=<BASE_PROJECT_NAME>>> %GITHUB_OUTPUT%
+
+      - name: ComplianceRepo
+        id: set-ComplianceRepo
+        run: echo ComplianceRepo=<COMPLAINCE_REPO_PATH>>> %GITHUB_OUTPUT%
+# enter ComplianceRepo as Project/Repository, eg: DataMigrators/Compliance
+
+      - name: ComplianceFatalTags
+        id: set-ComplianceFatalTags
+        run: echo ComplianceFatalTags=fail-upgrade>> %GITHUB_OUTPUT%
+
+      - name: PSSpecialHandling
+        id: set-PSSpecialHandling
+        run: echo PSSpecialHandling=<TRUE_OR_FALSE>>> %GITHUB_OUTPUT%
+
+
+# Details of the github runner that executes commands against the legacy DataStage instance
+# The MCIPASSWORD is configured as a Secret against the Environment in Github
+  EnvSetupLegacyAgent:
+    name: Publish Legacy Agent Env Vars
+    runs-on: [self-hosted, Windows, MettleCI, DataStage11.5]
+    outputs:
+      var_AgentMettleCmd: ${{ steps.set-AgentMettleCmd.outputs.AgentMettleCmd }}
+      var_AgentMettleHome: ${{ steps.set-AgentMettleHome.outputs.AgentMettleHome }}
+      var_MCIUsername: ${{ steps.set-MCIUsername.outputs.MCIUsername }}
+    steps:
+      - name: AgentMettleCmd
+        id: set-AgentMettleCmd
+        run: echo AgentMettleCmd=<LEGACY_AGENT_METTLE_CMD>>> %GITHUB_OUTPUT%
+
+      - name: AgentMettleHome
+        id: set-AgentMettleHome
+        run: echo AgentMettleHome=<LEGACY_AGENT_METTLE_HOME>>> %GITHUB_OUTPUT%
+
+      - name: MCIUsername
+        id: set-MCIUsername
+        run: echo MCIUsername=<LEGACY_MCI_USERNAME>>> %GITHUB_OUTPUT%
+
+# Details of the github runner that executes commands against a target DataStage instance
+# The MCI password is configured as a Secret against the Environment in Github
+  EnvSetupTargetAgent:
+    name: Publish Target Agent Env Vars
+    runs-on: [self-hosted, Windows, MettleCI, DataStage11.7]
+    outputs:
+      var_AgentMettleCmd: ${{ steps.set-AgentMettleCmd.outputs.AgentMettleCmd }}
+      var_AgentMettleHome: ${{ steps.set-AgentMettleHome.outputs.AgentMettleHome }}
+      var_MCIUsername: ${{ steps.set-MCIUsername.outputs.MCIUsername }}
+    steps:
+      - name: AgentMettleCmd
+        id: set-AgentMettleCmd
+        run: echo AgentMettleCmd=<TARGET_AGENT_METTLE_CMD>>> %GITHUB_OUTPUT%
+
+      - name: AgentMettleHome
+        id: set-AgentMettleHome
+        run: echo AgentMettleHome=<TARGET_AGENT_METTLE_HOME>>> %GITHUB_OUTPUT%
+
+      - name: MCIUsername
+        id: set-MCIUsername
+        run: echo MCIUsername=<TARGET_MCI_USERNAME>>> %GITHUB_OUTPUT%
+
+# Details of the legacy DataStage instance
+  EnvSetup115Engine:
+    name: Publish DataStage 11.5 Env Vars
+    runs-on: [self-hosted, Windows, MettleCI, DataStage11.5]
+    outputs:
+      var_IISDomainName: ${{ steps.set-IISDomainName.outputs.IISDomainName }}
+      var_IISEngineName: ${{ steps.set-IISEngineName.outputs.IISEngineName }}
+      var_IISUsername: ${{ steps.set-IISUsername.outputs.IISUsername }}
+      var_IISProjectTemplateDir: ${{ steps.set-IISProjectTemplateDir.outputs.IISProjectTemplateDir }}
+      var_UnitTestPath: ${{ steps.set-UnitTestPath.outputs.UnitTestPath }}
+    steps:
+      - name: IISDomainName
+        id: set-IISDomainName
+        run: echo IISDomainName=<LEGACY_IIS_DOMAIN_NAME>>> %GITHUB_OUTPUT%
+
+      - name: IISEngineName
+        id: set-IISEngineName
+        run: echo IISEngineName=<LEGACY_IIS_ENGINE_NAME>>> %GITHUB_OUTPUT%
+
+      - name: IISUsername
+        id: set-IISUsername
+        run: echo IISUsername=<LEGACY_IIS_USERNAME>>> %GITHUB_OUTPUT%
+      
+      - name: IISProjectTemplateDir
+        id: set-IISProjectTemplateDir
+        run: echo IISProjectTemplateDir=<LEGACY_IIS_PROJECT_TEMPLATE_PATH>>> %GITHUB_OUTPUT%
+      
+      - name: UnitTestPath
+        id: set-UnitTestPath
+        run: echo UnitTestPath=<LEGACY_MCI_IIS_UNIT_TEST_BASE_PATH>>> %GITHUB_OUTPUT%
+
+# Details of the target DataStage instance
+# If more than one target instance exists, this job must be repeated for each installation,
+# each with its own distinctive job name.
+# In this situation, each job that interacts with a specific Environment in Gitlab
+# must specify the correct job name under the [needs] clause. 
+# Deployment environments are denoted in MettleCI by EnvID and correspond with the Gitlab Environment
+# eg: 'lci' in MettleCI  <--> the Environment 'Upgrade Legacy - Continuous Integration' configured in Gitlab
+# IISPASSWORD is configured as a Secret against the Gitlab Environment
+  EnvSetup117Engine:
+    name: Publish DataStage 11.7 Env Vars
+    runs-on: [self-hosted, Windows, MettleCI, DataStage11.7]
+    outputs:
+      var_IISDomainName: ${{ steps.set-IISDomainName.outputs.IISDomainName }}
+      var_IISEngineName: ${{ steps.set-IISEngineName.outputs.IISEngineName }}
+      var_IISUsername: ${{ steps.set-IISUsername.outputs.IISUsername }}
+      var_IISProjectTemplateDir: ${{ steps.set-IISProjectTemplateDir.outputs.IISProjectTemplateDir }}
+      var_UnitTestPath: ${{ steps.set-UnitTestPath.outputs.UnitTestPath }}
+    steps:
+      - name: IISDomainName
+        id: set-IISDomainName
+        run: echo IISDomainName=<TARGET_IIS_DOMAIN_NAME>>> %GITHUB_OUTPUT%
+
+      - name: IISEngineName
+        id: set-IISEngineName
+        run: echo IISEngineName=<TARGET_IIS_ENGINE_NAME>>> %GITHUB_OUTPUT%
+
+      - name: IISUsername
+        id: set-IISUsername
+        run: echo IISUsername=<TARGET_IIS_USERNAME>>> %GITHUB_OUTPUT%
+      
+      - name: IISProjectTemplateDir
+        id: set-IISProjectTemplateDir
+        run: echo IISProjectTemplateDir=<TARGET_IIS_PROJECT_TEMPLATE_PATH>>> %GITHUB_OUTPUT%
+      
+      - name: UnitTestPath
+        id: set-UnitTestPath
+        run: echo UnitTestPath=<TARGET_MCI_IIS_UNIT_TEST_BASE_PATH>>> %GITHUB_OUTPUT%
+
+# Set up the CCMT specific settings, related to whether the pipeline also performs the Oracle connector variant upgrade
+# UpgradedOracleVersion is still mandatory, but irrelevant if UpgradeOracleVariant is false
+  EnvSetupCCMT:
+    name: Publish CCMT Configuration Env Vars
+    runs-on: [self-hosted, Windows, MettleCI, DataStage11.7]
+    outputs:
+      var_UpgradeOracleVariant: ${{ steps.set-UpgradeOracleVariant.outputs.UpgradeOracleVariant }}
+      var_UpgradedOracleVersion: ${{ steps.set-UpgradedOracleVersion.outputs.UpgradedOracleVersion }}
+    steps:
+      - name: UpgradeOracleVariant
+        id: set-UpgradeOracleVariant
+        run: echo UpgradeOracleVariant=<true_or_false>>> %GITHUB_OUTPUT%
+
+      - name: UpgradedOracleVersion
+        id: set-UpgradedOracleVersione
+        run: echo UpgradedOracleVersion=<11_or_12>>> %GITHUB_OUTPUT%
+
+
+  Diagnostics115:
+    name: Diagnostics Job - 11.5
+    runs-on: [self-hosted, Windows, MettleCI, DataStage11.5]
+    needs: [EnvSetupBase, EnvSetupLegacyAgent, EnvSetup115Engine]
+    env:
+      EnvID: lci
+      DatastageProject: ${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_lci
+
+    steps:
+      - name: Print environment variables
+        run: |
+          echo "IISUsername: ${{ needs.EnvSetup115Engine.outputs.var_IISUsername }}" ^
+          echo "IISPassword: ${{ secrets.IISPassword }}" ^
+          echo "IISDomainName: ${{ needs.EnvSetup115Engine.outputs.var_IISDomainName }}" ^
+          echo "IISEngineName: ${{ needs.EnvSetup115Engine.outputs.var_IISEngineName }}" ^
+          echo "EnvID: ${{ env.EnvID }}" ^
+          echo "BaseIISProjectName: ${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}" ^
+          echo "DatastageProject: ${{ env.DatastageProject }}" ^
+          echo "ProjectCacheDir: ${{ needs.EnvSetupLegacyAgent.outputs.var_AgentMettleHome }}\cache\${{ needs.EnvSetup115Engine.outputs.var_IISEngineName }}\${{ env.DatastageProject }}" ^
+          echo "MCIUsername: ${{ needs.EnvSetupLegacyAgent.outputs.var_MCIUsername }}" ^
+          echo "MCIPassword: ${{ secrets.MCIPASSWORD }}" ^
+          echo "AgentMettleCmd: ${{ needs.EnvSetupLegacyAgent.outputs.var_AgentMettleCmd }}" ^
+          echo "ADOProject: ${{ env.System.TeamProject }}" ^
+          echo "SourceRepo: ${{ env.Build.Repository.Name }}" ^
+          echo "Agent.Name: ${{ env.Agent.Name }}"
+
+
+  Diagnostics117:
+    name: Diagnostics Job - 11.7
+    runs-on: [self-hosted, Windows, MettleCI, DataStage11.7]
+    needs: [EnvSetupBase, EnvSetupTargetAgent, EnvSetup117Engine]
+    env:
+      EnvID: ci
+      DatastageProject: ${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_ci
+
+    steps:
+      - name: Print environment variables
+        run: |
+          echo "IISUsername: ${{ needs.EnvSetup117Engine.outputs.var_IISUsername }}" ^
+          echo "IISPassword: ${{ secrets.IISPassword }}" ^
+          echo "IISDomainName: ${{ needs.EnvSetup117Engine.outputs.var_IISDomainName }}" ^
+          echo "IISEngineName: ${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}" ^
+          echo "EnvID: ${{ env.EnvID }}" ^
+          echo "BaseIISProjectName: ${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}" ^
+          echo "DatastageProject: ${{ env.DatastageProject }}" ^
+          echo "ProjectCacheDir: ${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleHome }}\cache\${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}\${{ env.DatastageProject }}" ^
+          echo "MCIUsername: ${{ needs.EnvSetupTargetAgent.outputs.var_MCIUsername }}" ^
+          echo "MCIPassword: ${{ secrets.MCIPASSWORD }}" ^
+          echo "AgentMettleCmd: ${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleCmd }}" ^
+          echo "ADOProject: ${{ env.System.TeamProject }}" ^
+          echo "SourceRepo: ${{ env.Build.Repository.Name }}" ^
+          echo "Agent.Name: ${{ env.Agent.Name }}"
+
+
+  Create_DSParams_Diff_Artifact:
+    name: Create DSParams Diff Artifact
+    runs-on: [self-hosted, Windows, MettleCI, DataStage11.5]
+    needs: [EnvSetupBase, EnvSetupLegacyAgent, EnvSetup115Engine] 
+    environment: Upgrade Legacy - Continuous Integration
+    env:
+      EnvID: lci
+      DatastageProject: ${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_lci
+    steps:
+      - name: Checkout Project Repo
+        uses: actions/checkout@master
+
+      - name: Fetch Template DSParams
+        run: |
+          ${{ needs.EnvSetupLegacyAgent.outputs.var_AgentMettleCmd }} remote download ^
+          -host ${{ needs.EnvSetup115Engine.outputs.var_IISEngineName }} ^
+          -username ${{ needs.EnvSetupLegacyAgent.outputs.var_MCIUsername }} -password ${{ secrets.MCIPASSWORD }}  ^
+          -source ${{ needs.EnvSetup115Engine.outputs.var_IISProjectTemplateDir }}/ ^
+          -destination ${{ github.workspace }}/templates/ ^
+          -transferPattern "DSParams"
+
+      - name: Create Artifacts Dir
+        run: if not exist ${{ github.workspace }}\artifacts mkdir ${{ github.workspace }}\artifacts 
+
+      - name: Generate DSParams.diff
+        run: |
+          ${{ needs.EnvSetupLegacyAgent.outputs.var_AgentMettleCmd }} dsparams diff ^
+          -before ${{ github.workspace }}/templates/DSParams ^
+          -after ${{ github.workspace }}/datastage/DSParams ^
+          -diff ${{ github.workspace }}/artifacts/DSParams.diff
+
+      - name: Publish artifact DSParams.diff
+        uses: actions/upload-artifact@v3
+        with:
+          name: DSParams.diff
+          path: |
+            ${{ github.workspace }}/artifacts
+
+  Deploy_Legacy_CI:
+    name: Deploy - Legacy CI
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupLegacyAgent, EnvSetup115Engine, Create_DSParams_Diff_Artifact]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/deploy-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.5"]'
+      EnvironmentName: "Upgrade Legacy - Continuous Integration"
+      EnvID: lci
+      AgentMettleCmd: ${{ needs.EnvSetupLegacyAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_lci"
+      IISDomainName: ${{ needs.EnvSetup115Engine.outputs.var_IISDomainName }}
+      IISEngineName: ${{ needs.EnvSetup115Engine.outputs.var_IISEngineName }}
+      IISUsername: ${{ needs.EnvSetup115Engine.outputs.var_IISUsername }}
+      ProjectCacheDir: "${{ needs.EnvSetupLegacyAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup115Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_lci"
+      MCIUsername: ${{ needs.EnvSetupLegacyAgent.outputs.var_MCIUsername }}
+      UpdateDSParams: false
+      PublishCompilationTests: true
+      PSSpecialHandling: ${{ needs.EnvSetupBase.outputs.var_PSSpecialHandling == 'true' }}
+    secrets:
+      IISPassword: ${{ secrets.IISPASSWORD }}
+      MCIPassword: ${{ secrets.MCIPASSWORD }}
+    concurrency: Upgrade Legacy - Continuous Integration
+
+  Compliance_Test_Legacy_CI-Errors:
+    name: Compliance - Legacy CI - Errors
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupLegacyAgent, EnvSetup115Engine, Deploy_Legacy_CI]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/compliance-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.5"]'
+      EnvironmentName: "Upgrade Legacy - Continuous Integration"
+      ComplianceRepoName: ${{ needs.EnvSetupBase.outputs.var_ComplianceRepo }}
+      IncludeTags: ${{ needs.EnvSetupBase.outputs.var_ComplianceFatalTags }}
+      ExcludeTags: ''
+      ComplianceSuite: Errors
+      AgentMettleCmd: ${{ needs.EnvSetupLegacyAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_lci"
+      ProjectCacheDir: "${{ needs.EnvSetupLegacyAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup115Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_lci"
+      ContinueOnError: false
+    secrets:
+      PAT: ${{ secrets.COMPLIANCE_ACCESS }}
+    concurrency: Upgrade Legacy - Continuous Integration - Compliance Errors
+
+  Compliance_Test_Legacy_CI-Warnings:
+    name: Compliance - Legacy CI - Warnings
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupLegacyAgent, EnvSetup115Engine, Deploy_Legacy_CI]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/compliance-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.5"]'
+      EnvironmentName: "Upgrade Legacy - Continuous Integration"
+      ComplianceRepoName: ${{ needs.EnvSetupBase.outputs.var_ComplianceRepo }}
+      IncludeTags: ''
+      ExcludeTags: ${{ needs.EnvSetupBase.outputs.var_ComplianceFatalTags }}
+      ComplianceSuite: Warnings
+      AgentMettleCmd: ${{ needs.EnvSetupLegacyAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_lci"
+      ProjectCacheDir: "${{ needs.EnvSetupLegacyAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup115Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_lci"
+      ContinueOnError: true
+    secrets:
+      PAT: ${{ secrets.COMPLIANCE_ACCESS }}
+    concurrency: Upgrade Legacy - Continuous Integration - Compliance Warnings
+
+  Unittest_Legacy_CI:
+    name: Unit Test - Legacy CI
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupLegacyAgent, EnvSetup115Engine, Deploy_Legacy_CI]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/unittest-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.5"]'
+      EnvironmentName: "Upgrade Legacy - Continuous Integration"
+      EnvID: lci
+      AgentMettleCmd: ${{ needs.EnvSetupLegacyAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_lci"
+      IISDomainName: ${{ needs.EnvSetup115Engine.outputs.var_IISDomainName }}
+      IISEngineName: ${{ needs.EnvSetup115Engine.outputs.var_IISEngineName }}
+      IISUsername: ${{ needs.EnvSetup115Engine.outputs.var_IISUsername }}
+      ProjectCacheDir: "${{ needs.EnvSetupLegacyAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup115Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_lci"
+      MCIUsername: ${{ needs.EnvSetupLegacyAgent.outputs.var_MCIUsername }}
+      UnitTestPath: ${{ needs.EnvSetup115Engine.outputs.var_UnitTestPath }}
+    secrets:
+      IISPassword: ${{ secrets.IISPASSWORD }}
+      MCIPassword: ${{ secrets.MCIPASSWORD }}
+    concurrency: Upgrade Legacy - Continuous Integration
+
+
+  Deploy_Target_CI:
+    name: Deploy - Target CI
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupTargetAgent, EnvSetup117Engine, Compliance_Test_Legacy_CI-Warnings, Compliance_Test_Legacy_CI-Errors, Unittest_Legacy_CI]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/deploy-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.7"]'
+      EnvironmentName: "Upgrade Target - Continuous Integration"
+      EnvID: ci
+      AgentMettleCmd: ${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_ci"
+      IISDomainName: ${{ needs.EnvSetup117Engine.outputs.var_IISDomainName }}
+      IISEngineName: ${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}
+      IISUsername: ${{ needs.EnvSetup117Engine.outputs.var_IISUsername }}
+      ProjectCacheDir: "${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_ci"
+      MCIUsername: ${{ needs.EnvSetupTargetAgent.outputs.var_MCIUsername }}
+      UpdateDSParams: true
+      ProjectTemplate: ${{ needs.EnvSetup117Engine.outputs.var_IISProjectTemplateDir }}
+      PublishCompilationTests: true
+      PSSpecialHandling: ${{ needs.EnvSetupBase.outputs.var_PSSpecialHandling == 'true' }}
+    secrets:
+      IISPassword: ${{ secrets.IISPASSWORD }}
+      MCIPassword: ${{ secrets.MCIPASSWORD }}
+    concurrency: Upgrade Target - Continuous Integration
+
+  CCMT_Target_CI:
+    name: CCMT - Target CI
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupTargetAgent, EnvSetup117Engine, EnvSetupCCMT, Deploy_Target_CI]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/ccmt-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.7"]'
+      EnvironmentName: "Upgrade Target - Continuous Integration"
+      EnvID: ci
+      AgentMettleCmd: ${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_ci"
+      IISDomainName: ${{ needs.EnvSetup117Engine.outputs.var_IISDomainName }}
+      IISEngineName: ${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}
+      IISUsername: ${{ needs.EnvSetup117Engine.outputs.var_IISUsername }}
+      ProjectCacheDir: "${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_ci"
+      PublishCompilationTests: true
+      UpgradeOracleVariant: ${{ needs.EnvSetupCCMT.outputs.var_UpgradeOracleVariant }}
+      UpgradedOracleVersion: ${{ needs.EnvSetupCCMT.outputs.var_UpgradedOracleVersion }}
+    secrets:
+      IISPassword: ${{ secrets.IISPASSWORD }}
+    concurrency: Upgrade Target - Continuous Integration
+
+  Unittest_Target_CI:
+    name: Unit Test - Target CI
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupTargetAgent, EnvSetup117Engine, CCMT_Target_CI]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/unittest-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.7"]'
+      EnvironmentName: "Upgrade Target - Continuous Integration"
+      EnvID: ci
+      AgentMettleCmd: ${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_ci"
+      IISDomainName: ${{ needs.EnvSetup117Engine.outputs.var_IISDomainName }}
+      IISEngineName: ${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}
+      IISUsername: ${{ needs.EnvSetup117Engine.outputs.var_IISUsername }}
+      ProjectCacheDir: "${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_ci"
+      MCIUsername: ${{ needs.EnvSetupTargetAgent.outputs.var_MCIUsername }}
+      UnitTestPath: ${{ needs.EnvSetup117Engine.outputs.var_UnitTestPath }}
+    secrets:
+      IISPassword: ${{ secrets.IISPASSWORD }}
+      MCIPassword: ${{ secrets.MCIPASSWORD }}
+    concurrency: Upgrade Target - Continuous Integration
+
+
+  Deploy_Target_QA:
+    name: Deploy - Target QA
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupTargetAgent, EnvSetup117Engine, Unittest_Target_CI]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/deploy-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.7"]'
+      EnvironmentName: "Upgrade Target - Quality Assurance"
+      EnvID: qa
+      AgentMettleCmd: ${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_qa"
+      IISDomainName: ${{ needs.EnvSetup117Engine.outputs.var_IISDomainName }}
+      IISEngineName: ${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}
+      IISUsername: ${{ needs.EnvSetup117Engine.outputs.var_IISUsername }}
+      ProjectCacheDir: "${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_qa"
+      MCIUsername: ${{ needs.EnvSetupTargetAgent.outputs.var_MCIUsername }}
+      UpdateDSParams: true
+      ProjectTemplate: ${{ needs.EnvSetup117Engine.outputs.var_IISProjectTemplateDir }}
+      PublishCompilationTests: true
+      PSSpecialHandling: ${{ needs.EnvSetupBase.outputs.var_PSSpecialHandling == 'true' }}
+    secrets:
+      IISPassword: ${{ secrets.IISPASSWORD }}
+      MCIPassword: ${{ secrets.MCIPASSWORD }}
+    concurrency: Upgrade Target - Quality Assurance
+
+  CCMT_Target_QA:
+    name: CCMT - Target QA
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupTargetAgent, EnvSetup117Engine, EnvSetupCCMT, Deploy_Target_QA]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/ccmt-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.7"]'
+      EnvironmentName: "Upgrade Target - Quality Assurance"
+      EnvID: qa
+      AgentMettleCmd: ${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_qa"
+      IISDomainName: ${{ needs.EnvSetup117Engine.outputs.var_IISDomainName }}
+      IISEngineName: ${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}
+      IISUsername: ${{ needs.EnvSetup117Engine.outputs.var_IISUsername }}
+      ProjectCacheDir: "${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_qa"
+      PublishCompilationTests: true
+      UpgradeOracleVariant: ${{ needs.EnvSetupCCMT.outputs.var_UpgradeOracleVariant }}
+      UpgradedOracleVersion: ${{ needs.EnvSetupCCMT.outputs.var_UpgradedOracleVersion }}
+    secrets:
+      IISPassword: ${{ secrets.IISPASSWORD }}
+    concurrency: Upgrade Target - Quality Assurance
+
+
+  Deploy_Target_Perf:
+    name: Deploy - Target Perf
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupTargetAgent, EnvSetup117Engine, CCMT_Target_QA]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/deploy-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.7"]'
+      EnvironmentName: "Upgrade Target - Performance"
+      EnvID: perf
+      AgentMettleCmd: ${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_perf"
+      IISDomainName: ${{ needs.EnvSetup117Engine.outputs.var_IISDomainName }}
+      IISEngineName: ${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}
+      IISUsername: ${{ needs.EnvSetup117Engine.outputs.var_IISUsername }}
+      ProjectCacheDir: "${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_perf"
+      MCIUsername: ${{ needs.EnvSetupTargetAgent.outputs.var_MCIUsername }}
+      UpdateDSParams: true
+      ProjectTemplate: ${{ needs.EnvSetup117Engine.outputs.var_IISProjectTemplateDir }}
+      PublishCompilationTests: true
+      PSSpecialHandling: ${{ needs.EnvSetupBase.outputs.var_PSSpecialHandling == 'true' }}
+    secrets:
+      IISPassword: ${{ secrets.IISPASSWORD }}
+      MCIPassword: ${{ secrets.MCIPASSWORD }}
+    concurrency: Upgrade Target - Performance
+
+  CCMT_Target_Perf:
+    name: CCMT - Target Perf
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupTargetAgent, EnvSetup117Engine, EnvSetupCCMT, Deploy_Target_Perf]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/ccmt-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.7"]'
+      EnvironmentName: "Upgrade Target - Performance"
+      EnvID: perf
+      AgentMettleCmd: ${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_perf"
+      IISDomainName: ${{ needs.EnvSetup117Engine.outputs.var_IISDomainName }}
+      IISEngineName: ${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}
+      IISUsername: ${{ needs.EnvSetup117Engine.outputs.var_IISUsername }}
+      ProjectCacheDir: "${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_perf"
+      PublishCompilationTests: true
+      UpgradeOracleVariant: ${{ needs.EnvSetupCCMT.outputs.var_UpgradeOracleVariant }}
+      UpgradedOracleVersion: ${{ needs.EnvSetupCCMT.outputs.var_UpgradedOracleVersion }}
+    secrets:
+      IISPassword: ${{ secrets.IISPASSWORD }}
+    concurrency: Upgrade Target - Performance
+
+
+  Deploy_Target_Prod:
+    name: Deploy - Target Prod
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupTargetAgent, EnvSetup117Engine, CCMT_Target_Perf]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/deploy-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.7"]'
+      EnvironmentName: "Upgrade Target - Production"
+      EnvID: prod
+      AgentMettleCmd: ${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_prod"
+      IISDomainName: ${{ needs.EnvSetup117Engine.outputs.var_IISDomainName }}
+      IISEngineName: ${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}
+      IISUsername: ${{ needs.EnvSetup117Engine.outputs.var_IISUsername }}
+      ProjectCacheDir: "${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_prod"
+      MCIUsername: ${{ needs.EnvSetupTargetAgent.outputs.var_MCIUsername }}
+      UpdateDSParams: true
+      ProjectTemplate: ${{ needs.EnvSetup117Engine.outputs.var_IISProjectTemplateDir }}
+      PublishCompilationTests: true
+      PSSpecialHandling: ${{ needs.EnvSetupBase.outputs.var_PSSpecialHandling == 'true' }}
+    secrets:
+      IISPassword: ${{ secrets.IISPASSWORD }}
+      MCIPassword: ${{ secrets.MCIPASSWORD }}
+    concurrency: Upgrade Target - Production
+
+  CCMT_Target_Prod:
+    name: CCMT - Target Prod
+    # The “with” statement that supplies arguments can only take elements from the github context and the “needs”
+    # object, so you MUST have a line that “needs” the job where you set the values and return the outputs.
+    needs: [EnvSetupBase, EnvSetupTargetAgent, EnvSetup117Engine, EnvSetupCCMT, Deploy_Target_Prod]
+    # The “uses” statement that calls the reusable workflow can’t evaluate expressions yet.
+    # That means the repo name, branch, etc. must be hardcoded.
+    uses: DataMigrators/demo1115.github.mettleci.io/.github/workflows/ccmt-template.yaml@main
+    # The “with” statement that supplies arguments cannot yet parse expressions. :-(
+    with:
+      RunOn: '["self-hosted", "Windows", "MettleCI", "DataStage11.7"]'
+      EnvironmentName: "Upgrade Target - Production"
+      EnvID: prod
+      AgentMettleCmd: ${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleCmd }}
+      DatastageProject: "${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_prod"
+      IISDomainName: ${{ needs.EnvSetup117Engine.outputs.var_IISDomainName }}
+      IISEngineName: ${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}
+      IISUsername: ${{ needs.EnvSetup117Engine.outputs.var_IISUsername }}
+      ProjectCacheDir: "${{ needs.EnvSetupTargetAgent.outputs.var_AgentMettleHome }}/cache/${{ needs.EnvSetup117Engine.outputs.var_IISEngineName }}/${{ needs.EnvSetupBase.outputs.var_BaseIISProjectName }}_prod"
+      PublishCompilationTests: true
+      UpgradeOracleVariant: ${{ needs.EnvSetupCCMT.outputs.var_UpgradeOracleVariant }}
+      UpgradedOracleVersion: ${{ needs.EnvSetupCCMT.outputs.var_UpgradedOracleVersion }}
+    secrets:
+      IISPassword: ${{ secrets.IISPASSWORD }}
+    concurrency: Upgrade Target - Production

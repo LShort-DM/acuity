@@ -1,0 +1,13 @@
+.mci_compliance:
+  script:
+    - git clone https://gitlab-ci-token:${CI_JOB_TOKEN}@${ComplianceRepo}
+    - >
+      & $AgentMettleCmd compliance test `
+      -assets $CI_PROJECT_DIR/datastage `
+      -report "compliance-reports/compliance_report_$ComplianceSuite.xml" `
+      -junit `
+      -rules $CI_PROJECT_DIR/gitlab-compliance `
+      -include-tags $IncludeTags `
+      -exclude-tags $ExcludeTags `
+      -project-cache $AgentMettleHome/cache/$IISEngineName/$DATASTAGE_PROJECT `
+      -test-suite "$ComplianceSuite"

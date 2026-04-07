@@ -1,0 +1,226 @@
+// Jenkins DevOps Pipeline, Data Migrators
+//
+//  +----------------+   +----------------+   +----------------+   +---------------+   +---------------+
+//  |                |   |  CONTINUOUS    |   |   QUALITY      |   |               |   |               |
+//  |  DEVELOPMENT   +--->  INTEGRATION   +--->   ASSURANCE    +--->  PERFORMANCE  +--->   PRODUCTION  |
+//  +----------------+   +----------------+   +----------------+   +---------------+   +---------------+
+//
+// In Jenkins configuration, under Jenkins -> Manage Jenkins -> Configure System -> Global Pipeline Libraries,
+// add a reference to the Jenkins MCI Shared Libraries, giving it the name "jenkins-mci-shared-libraries"
+// Doing that allows this line to reference that shared library and use the MettleCI step types
+@Library('jenkins-mci-shared-libraries') _
+
+pipeline {
+  	agent none
+
+    environment {
+//      Set the basic values to be used across the entire pipeline
+        IIS_BASE_PROJECT_NAME = '<BASE_PROJECT_NAME>'
+        COMPLIANCE_REPO_CREDENTIALS = '<JENKINS_COMPLIANCE_CREDENTIAL_ID>'
+        COMPLIANCE_REPO_URL = '<COMPLIANCE_REPOSITORY_URL>'
+        COMPLIANCE_FAIL_TAG = 'fail-ci'
+
+//      In each stage, update the agent label to select the appropriate agent.
+//      When configuring an agent in Jenkins, provide for them the label that this pipeline can reference.
+
+//      Enable MettleCI Parameter Set special handling.
+//      MettleCI provides a facility to create a single value file per environment during deployment, 
+//      avoiding the need to deploy all value files to every environment.
+//      https://datamigrators.atlassian.net/wiki/spaces/MCIDOC/pages/469631007#Parameter-Sets-and-Value-Files
+        PS_SPECIALHANDLING = true
+    }
+    
+    stages {
+        stage("Diagnostics 11.7") {
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            environment {
+                ENVID = "ci"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    bat label: 'Diags 117',
+                        script: '''
+                            echo Diagnostics - 11.5 Non-Production
+                            echo IISUsername: %IISUSERNAME%
+                            echo IISPassword: %IISPASSWORD%
+                            echo IISDomainName: %IISDOMAINNAME%
+                            echo IISEngineName: %IISENGINENAME%
+                            echo EnvID: %ENVID%
+                            echo BaseIISProjectName: %IIS_BASE_PROJECT_NAME%
+                            echo DatastageProject: %DATASTAGE_PROJECT%
+                            echo ProjectCacheDir: %AGENTMETTLEHOME%\\cache\\%IISENGINENAME%\\%DATASTAGE_PROJECT%
+                            echo MCIUsername: %MCIUSERNAME%
+                            echo MCIPassword: %MCIPASSWORD%
+                            echo AgentMettleCmd: %AGENTMETTLEHOME%
+                            echo Agent Name: %NODE_NAME%
+                        '''
+                }
+            }
+            post {
+                always {
+                    bat label: 'Post', script: "echo Done"
+                }
+            }
+        }
+
+        stage("Deploy - CI") {
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            environment {
+                ENVID = "ci"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+                UPGRADE_DSPARAMS = false
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    mci_deploy(
+                        true,
+                        UPGRADE_DSPARAMS,
+                        PS_SPECIALHANDLING
+                    )
+                }
+            }
+        }
+
+        stage('Test - CI') {
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            environment {
+                ENVID = "ci"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    mci_compliance(
+                        env.COMPLIANCE_REPO_CREDENTIALS,
+                        env.COMPLIANCE_REPO_URL,
+                        "",                             // Include tags
+                        env.COMPLIANCE_FAIL_TAG,        // Exclude tags
+                        "Warnings",
+                        true
+                    )
+
+                    mci_compliance(
+                        env.COMPLIANCE_REPO_CREDENTIALS,
+                        env.COMPLIANCE_REPO_URL,
+                        env.COMPLIANCE_FAIL_TAG,        // Include tags
+                        "",                             // Exclude tags
+                        "Errors",
+                        false
+                    )
+
+                    mci_unittest(
+                        "CI"
+                    )
+                }
+            }
+        }
+
+        stage("Deploy - QA") {
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            environment {
+                ENVID = "qa"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+                UPGRADE_DSPARAMS = false
+            }
+
+            steps {
+                input message: 'Approve deployment to QA environment?'
+
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    mci_deploy(
+                        true,
+                        UPGRADE_DSPARAMS,
+                        PS_SPECIALHANDLING
+                    )
+                }
+            }
+        }
+
+        stage("Deploy - Performance") {
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            environment {
+                ENVID = "perf"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+                UPGRADE_DSPARAMS = false
+            }
+
+            steps {
+                input message: 'Approve deployment to Performance environment?'
+
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    mci_deploy(
+                        true,
+                        UPGRADE_DSPARAMS,
+                        PS_SPECIALHANDLING
+                    )
+                }
+            }
+        }
+
+        stage("Deploy - Prod") {
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            environment {
+                ENVID = "prod"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+                UPGRADE_DSPARAMS = false
+            }
+
+            steps {
+                input message: 'Approve deployment to Production environment?'
+
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    mci_deploy(
+                        true,
+                        UPGRADE_DSPARAMS,
+                        PS_SPECIALHANDLING
+                    )
+                }
+            }
+        }
+    }
+}

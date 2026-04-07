@@ -1,0 +1,112 @@
+name: MettleCI CCMT Template
+
+on:
+  workflow_call:
+    inputs:
+      RunOn:
+        required: true
+        type: string
+      EnvironmentName:
+        description: ''
+        required: true
+        type: string
+      EnvID:
+        required: true
+        type: string
+      IISDomainName:
+        description: ''
+        required: true
+        type: string
+      IISEngineName:
+        description: ''
+        required: true
+        type: string
+      DatastageProject:
+        description: ''
+        required: true
+        type: string
+      ProjectCacheDir:
+        description: ''
+        required: true
+        type: string
+      IISUsername:
+        description: ''
+        required: true
+        type: string
+      AgentMettleCmd:
+        required: true
+        type: string
+      PublishCompilationTests:
+        required: false
+        type: boolean
+        default: false
+      UpgradeOracleVariant:
+        description: 'True to update Oracle Connector Variant'
+        required: false
+        type: boolean
+        default: false
+      UpgradedOracleVersion:
+        description: 'IF UpgradeOracleVariant set to true, specify 11 or 12 (default is 11)'
+        required: false
+        type: string
+        default: 11
+    secrets:
+      IISPASSWORD:
+        description: 'The IIS user password'
+        required: true
+
+permissions:
+  contents: read
+  checks: write
+
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+  ExecuteCCMT: 
+    runs-on: ${{ fromJSON(inputs.RunOn) }}
+    environment: ${{ inputs.EnvironmentName }}
+    env:
+      DATASTAGE_PROJECT: ${{ inputs.DatastageProject }}
+      ENVID: ${{ inputs.EnvID }}
+      IISENGINENAME: ${{ inputs.IISEngineName }}
+      UPGRADEORACLEVARIANT: ${{ inputs.UpgradeOracleVariant }}
+      UPGRADEDORACLEVERSION: ${{ inputs.UpgradedOracleVersion }}
+    steps:
+      - name: Checkout Project Repo
+        uses: actions/checkout@master
+
+      - name: Determine Oracle Upgrade
+        id: set-upgradeVariant
+        run: |
+          IF "%UPGRADEORACLEVARIANT%"=="true" (
+            echo upgradeVariant=-param " -T " -param " -V OracleConnector=%UPGRADEDORACLEVERSION%,OracleConnectorPX=%UPGRADEDORACLEVERSION% ">> %GITHUB_OUTPUT%
+          ) ELSE (
+            echo upgradeVariant=>> %GITHUB_OUTPUT%
+          )
+
+      - name: Run CCMT - Upgrade Stages
+        run: |
+          ${{ inputs.AgentMettleCmd }} datastage ccmt ^
+            -domain ${{ inputs.IISDomainName }} ^
+            -server ${{ inputs.IISEngineName }} ^
+            -username ${{ inputs.IISUsername }} -password ${{ secrets.IISPASSWORD }} ^
+            -project ${{ inputs.DatastageProject }} ^
+            -project-cache ${{ inputs.ProjectCacheDir }} ^
+            -isxdirectory datastage -logfile ${{ github.workspace }}/log/ccmt/log/cc_migrate.log.txt -threads 4 ^
+            -param " -M " ${{ steps.set-upgradeVariant.outputs.upgradeVariant }}   
+
+      - name: Check For Test Results
+        id: set-fileExists
+        run: echo fileExists=Test-Path -Path "${{ github.workspace }}/log/**/mettleci_compilation.xml">> %GITHUB_OUTPUT%
+
+      - name: 'Publish unit test results'
+        if: (${{ inputs.PublishCompilationTests }} == true and ${{ steps.set-fileExists.outputs.fileExists }} == true)
+        uses: mikepenz/action-junit-report@v3
+        with:
+          report_paths: "${{ github.workspace }}/log/**/mettleci_compilation.xml"
+          require_tests: false
+          fail_on_failure: false
+          check_name: "Post-CCMT DataStage Compilation - ${{ inputs.EnvironmentName }}"
+          summary: true

@@ -1,0 +1,15 @@
+# ---------------------------------
+# PERFORMANCE ENVIRONMENT VARIABLES
+# ---------------------------------
+#
+# This is a MettleCI variable substitution file for a generic 'Performance' testing environment.
+# Your software release chain is liklely to be different so define the environment variable
+# files relevant to your organization's environments.
+#
+# This file is used to subsitute environment-specific values into text files, such as DSParams files,
+# during depoyment.  This is performed using the 'mettleci properties config' command, documented here:
+# https://datamigrators.atlassian.net/wiki/spaces/MCIDOC/pages/718962693/Properties+Config+Command
+#
+# You can read more about properties files here:
+# https://en.m.wikipedia.org/wiki/.properties
+#

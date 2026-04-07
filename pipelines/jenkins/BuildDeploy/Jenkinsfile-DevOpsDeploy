@@ -1,0 +1,211 @@
+// Jenkins MettleCI DevOps Pipeline - Deploy Phase, Data Migrators
+//
+//  +----------------+   +----------------+   +----------------+   +---------------+   +---------------+
+//  |                |   |  CONTINUOUS    |   |   QUALITY      |   |               |   |               |
+//  |  DEVELOPMENT   +--->  INTEGRATION   +--->   ASSURANCE    +--->  PERFORMANCE  +--->   PRODUCTION  |
+//  +----------------+   +----------------+   +----------------+   +---------------+   +---------------+
+//                                          |
+//  --------------- Build ----------------->|------- Deploy ---->|----- Deploy ----->|---- Deploy ----->|
+//                                    (ci-x)|              (qa-x)            (perf-x)           (prod-x)
+//                                          |
+//
+// When code is checked into the repository, it automatically triggers the Build pipeline, 
+// which upon success tags the repository as a viable candidate for deployment to other
+// environments.
+//
+// This manually-triggered Deployment pipeline manages the selection of an appropriate candidate 
+// tag, and deploys the repository as of that tag into another environment.  Upon successful completion
+// of a deployment, that version of the repository is tagged as a candidate for promotion to the next
+// environment, culminating in a production deployment.
+//
+// Further detail regarding the creation and use of repository tags in this CI/CD process is located at
+// <confluence link>
+
+// In Jenkins configuration, under Jenkins -> Manage Jenkins -> Configure System -> Global Pipeline Libraries,
+// add a reference to the Jenkins MCI Shared Libraries, giving it the name "jenkins-mci-shared-libraries"
+// Doing that allows this line to reference that shared library and use the MettleCI step types
+@Library('jenkins-mci-shared-libraries') _
+
+pipeline {
+  	agent none
+
+    // By default, each stage checks out the latest versiuon of the repository contents.
+    // In this situation, we do not want this to occur, because the deployment asks the user which previous
+    // tagged version of the repository they would like to deploy.
+    options { skipDefaultCheckout() }
+
+    // Here is where to define the list of environments that can be deployed to.
+    // Note, this does not set an order of precedence. That is done futher down.
+    // When this pipeline is run, this instigates the choice of which environment the project is to be deployed to.
+    parameters {
+        choice (name: 'targetEnvironment', choices: ['qa', 'perf', 'prod'], description: 'Deploy to environment')
+    }
+
+    environment {
+        // Values enclosed in <...> are placeholders (eg: <BASE_PROJECT_NAME>), and describe the 
+        // information required to placed inside the single quotes.
+        IIS_BASE_PROJECT_NAME = '<BASE_PROJECT_NAME>'
+
+        PS_SPECIALHANDLING = true
+
+        ENVID = "${env.targetEnvironment}"
+
+        TAG_EMAIL = '<EMAIL>'
+        TAG_USER = '<USERNAME>'
+
+        // Limit the number of candidates displayed
+        NUM_TAGS_TO_DISPLAY = 5
+
+        // The name of the Jenkins pipeline project that updates the hotfix environment
+        HF_CREATION_PIPELINE = 'Jenkins-WWI-117-Hotfix-Create'
+    }
+
+
+    stages {
+        stage('Select Release to Deploy') {
+            agent {
+                label "mettleci && datastage11.7"
+            }
+            steps {
+                script {
+                    // This code enforces the order of precedence.
+                    // Values in the case statement relates to each of the choices on line 57.
+                    // Set TAG_PREFIX to the previous evironment, except qa (because it's the first target environment) which is set to "release"
+                    // eg: If the target environment is perf, candidate tags start with "qa"
+                    switch(env.targetEnvironment) {
+                        case 'qa':
+                            TAG_PREFIX = "ci"
+                            break
+                        case 'perf':
+                            TAG_PREFIX = "qa"
+                            break 
+                        case 'prod':
+                            TAG_PREFIX = "perf"
+                            break
+                    }
+                } 
+
+                withCredentials([
+                    gitUsernamePassword(credentialsId: scm.getUserRemoteConfigs()[0].getCredentialsId())
+                ]) {
+                    script {
+                        def scr = """
+                            @echo off
+                            git ls-remote --tags --sort=\"-v:refname\" ${scm.getUserRemoteConfigs()[0].getUrl()} \"${TAG_PREFIX}-[0-9]*^{}\"
+                        """   
+
+                        // Retrieve the tags matching the TAG_PREFIX
+                        String[] allTags = bat(script: scr, label: 'Retrieve tags', returnStdout: true).trim().split("\n")
+                        def cleanedTags = []
+
+                        int tagsRemaining = env.NUM_TAGS_TO_DISPLAY
+
+                        // Clean up the data returned from the request, and limit the results to the set number
+                        for (String line in allTags) {
+                            if (tagsRemaining-- == 0)  break
+                            
+                            cleanedTags.add("${line.split("/")[-1][0..-4]}")
+                        }
+
+                        // Prompt the user to select the desired candidate for deployment
+                        SELECTED_TAG = input message: 'Select the version to deploy', parameters: [choice(choices: cleanedTags.join('\n'),  description: 'Version', name: 'tag_response')]
+                    }
+                }
+
+                bat label: 'Deployment',
+                    script: "echo *** Deploying tag ${SELECTED_TAG} to ${env.targetEnvironment} ***"
+            }
+        }
+
+        stage('Deploy - Target') {
+            // Include the target environment name in the agent labels, to ensure the correct DataStage instance is used
+            agent {
+                label "mettleci && datastage11.7 && ${ env.ENVID }"
+            }
+            environment {
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+                UPGRADE_DSPARAMS = false
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    // Perform manual checkout of the selected tag.
+                    checkout([  
+                        $class: 'GitSCM',
+                        branches: [[name: "refs/tags/${SELECTED_TAG}"]],
+                        doGenerateSubmoduleConfigurations: scm.doGenerateSubmoduleConfigurations,
+                        extensions: [[$class: 'CloneOption', noTags: false, shallow: false, depth: 0, reference: '']],
+                        userRemoteConfigs: scm.userRemoteConfigs,
+                    ])
+                    
+                    mci_deploy(
+                        true,
+                        UPGRADE_DSPARAMS,
+                        PS_SPECIALHANDLING
+                    )
+                }
+            }
+        }
+
+        stage('Success - Tag Repository') {
+            agent {
+                label "mettleci && datastage11.7 && ${ env.ENVID }"
+            }
+            steps {
+                withCredentials([
+                    gitUsernamePassword(credentialsId: scm.getUserRemoteConfigs()[0].getCredentialsId())
+                ]) {
+                    // Again, manual checkout of the tag
+                    checkout([  
+                        $class: 'GitSCM',
+                        branches: [[name: "refs/tags/${SELECTED_TAG}"]],
+                        doGenerateSubmoduleConfigurations: scm.doGenerateSubmoduleConfigurations,
+                        extensions: [[$class: 'CloneOption', noTags: false, shallow: false, depth: 0, reference: '']],
+                        userRemoteConfigs: scm.userRemoteConfigs,
+                    ])
+                    
+                    // Tag the selected version of the repository with the target environment tag to make this a candidate
+                    // for promotion into the next environment.
+                    bat label: 'Tag current build',
+                        script: """
+                            git config user.email \"${TAG_EMAIL}\"
+                            git config user.name \"${TAG_USER}\"
+                            git tag -a ${env.targetEnvironment}-${SELECTED_TAG.split('-')[1]}  -m \"${env.JOB_BASE_NAME}: ${SELECTED_TAG} deployed to ${env.targetEnvironment}\"
+                            git push -f origin --tags
+                        """
+                }
+                     
+                script {
+                    // Mark this run in the Jenkins UI to show successful deployment.
+                    // This provides the history of successful deployment into the various target environments.
+                    currentBuild.displayName = "#${env.BUILD_NUMBER}: ${env.targetEnvironment}-${SELECTED_TAG.split('-')[1]}"
+                    currentBuild.description = "${SELECTED_TAG} deployed to ${env.targetEnvironment}"
+                }
+             }
+        }
+
+        stage('Call Hotfix Creation Pipeline')
+        {
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            when { expression {env.targetEnvironment == "prod"} }
+            steps {
+                bat label: 'Calling child',
+                    script: "echo Calling ${env.HF_CREATION_PIPELINE} with TRIGGER_TAG: ${env.targetEnvironment}-${SELECTED_TAG.split('-')[1]}"
+
+                script {
+                    build(
+                        job: "${env.HF_CREATION_PIPELINE}",
+                        parameters: [string(name: "TRIGGER_TAG", value: "${env.targetEnvironment}-${SELECTED_TAG.split('-')[1]}")],
+                        waitForBuild: false
+                    )
+                }
+            }
+        }
+    }
+}

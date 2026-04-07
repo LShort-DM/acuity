@@ -1,0 +1,165 @@
+// Jenkins MettleCI DevOps Hotfix Pipeline - Creation/Initiation Phase
+// Subsequent to the successful promotion of a new version of the DataStage project into Production, this pipeline
+// manages the creation of a hotfix pathway, creating a separate environment for fixing critical, time-sensitive issues
+// that occur in Production, using a separate process that bypasses the usual dev-test-prod development pathway.
+
+// This pipeline:
+//  - creates a hotfix branch in the source repository
+//  - deploys the newly promoted version of the DatsStage project into a separate project specifically for creating hotfixes
+//  - Updates the MettleCI Workbench hotfix project to point to the newly created branch in the repository
+
+// In Jenkins configuration, under Jenkins -> Manage Jenkins -> Configure System -> Global Pipeline Libraries,
+// add a refeerence to the Jenkins MCI Shared Libraries, giving it the name "jenkins-mci-shared-libraries"
+// Doing that allows this line to reference that shared library and use the MettleCI step types
+
+@Library('jenkins-templates') _
+
+pipeline {
+  	agent none
+
+    options { skipDefaultCheckout() }
+
+	parameters {
+		string (name: "TRIGGER_TAG", description: "Tag driving the creation of the hotfix branch")
+	}
+
+    environment {
+        // Values enclosed in <...> are placeholders (eg: <BASE_PROJECT_NAME>), and describe the 
+        // information required to placed inside the single quotes.
+        IIS_BASE_PROJECT_NAME = '<BASE_PROJECT_NAME>'
+
+        PS_SPECIALHANDLING = true
+
+        TAG_EMAIL = '<EMAIL>'
+        TAG_USER = '<USERNAME>'
+
+		BRANCH_NAME = "hotfix/hf-${TRIGGER_TAG.split('-')[1]}"
+    }
+
+    stages {
+/*
+        stage("Diagnostics 11.7") {
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            environment {
+                ENVID = "hf"
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    bat label: 'Diags 117', 
+                        script: """
+                            echo Diagnostics - 11.5 Non-Production
+                            echo IISUsername: %IISUSERNAME%
+                            echo IISPassword: %IISPASSWORD%
+                            echo IISDomainName: %IISDOMAINNAME%
+                            echo IISEngineName: %IISENGINENAME%
+                            echo EnvID: %ENVID%
+                            echo BaseIISProjectName: %IIS_BASE_PROJECT_NAME%
+                            echo DatastageProject: %DATASTAGE_PROJECT%
+                            echo ProjectCacheDir: %AGENTMETTLEHOME%\\cache\\%IISENGINENAME%\\%DATASTAGE_PROJECT%
+                            echo MCIUsername: %MCIUSERNAME%
+                            echo MCIPassword: %MCIPASSWORD%
+                            echo AgentMettleCmd: %AGENTMETTLEHOME%
+                            echo Agent Name: %NODE_NAME%
+ 							echo Tag: ${env.TRIGGER_TAG}
+							echo BRANCH_NAME: %BRANCH_NAME%
+                        """
+                }
+            }
+        }
+*/	
+
+		stage("Create hotfix branch") {
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+
+            steps {
+                withCredentials([
+                    gitUsernamePassword(credentialsId: scm.getUserRemoteConfigs()[0].getCredentialsId())
+                ]) {
+                    checkout([  
+                        $class: 'GitSCM',
+                        branches: [[name: "refs/tags/${TRIGGER_TAG}"]],
+                        doGenerateSubmoduleConfigurations: scm.doGenerateSubmoduleConfigurations,
+                        extensions: [[$class: 'CloneOption', noTags: false, shallow: false, depth: 0, reference: '']],
+                        userRemoteConfigs: scm.userRemoteConfigs,
+                    ])
+
+                    bat label: 'Tag current build',
+                        script: """
+                            git config --global --replace-all user.email \"${TAG_EMAIL}\"
+                            git config --global --replace-all user.name \"${TAG_USER}\"
+							git fetch --all
+							git checkout -b ${BRANCH_NAME}
+							git status
+							git push --set-upstream origin ${BRANCH_NAME}
+							git status
+                        """
+                }
+            }
+		}
+
+        stage("Deploy - HF") {
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            environment {
+                ENVID = "hf"
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+                UPGRADE_DSPARAMS = false
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    mci_deploy(
+                        true,
+                        UPGRADE_DSPARAMS,
+                        PS_SPECIALHANDLING
+                    )
+                }
+            }
+        }
+
+        stage('Update Workbench - HF') {                    
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            environment {
+                ENVID = "hf"
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+				
+				WORKBENCH_HOST = "https://${env.IISENGINENAME}:8443"
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+
+					bat label: "Set Workbench for new Hotfix branch",
+            			script: """
+							%AGENTMETTLECMD% workbench set-branch ^
+								-url %WORKBENCH_HOST% ^
+								-username %IISUSERNAME% -password %IISPASSWORD% ^
+								-project %DATASTAGE_PROJECT% ^
+								-branch %BRANCH_NAME%
+							"""
+                }
+            }
+        } 
+    }
+}
+
+
+

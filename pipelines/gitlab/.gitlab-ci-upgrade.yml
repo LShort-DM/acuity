@@ -1,0 +1,376 @@
+include: 
+  - local: '.templates/deploy-template.yml'
+  - local: '.templates/compliance-template.yml'
+  - local: '.templates/unittest-template.yml'
+  - local: '.templates/ccmt-template.yml'
+
+
+stages:
+  - diagnostics
+  - create_dsparams_diff_artifact
+  - deploy_legacy_ci
+  - compliance_legacy_ci
+  - unittest_legacy_ci
+  - deploy_target_ci
+  - ccmt_target_ci
+  - unittest_target_ci
+  - deploy_target_qa
+  - ccmt_target_qa
+  - unittest_target_qa
+  - deploy_target_perf
+  - ccmt_target_perf
+  - unittest_target_perf
+  - deploy_target_prod
+  - ccmt_target_prod
+  - unittest_target_prod
+
+
+# Values enclosed in <...> are placeholders (eg: <BASE_PROJECT_NAME>), and describe the 
+# information required.
+variables:
+  BaseIISProjectName: <BASE_PROJECT_NAME>
+  ComplianceRepo: <COMPLIANCE_REPO_URL>
+# eg: ComplianceRepo: gitlab.dm-demo-alm.mettleci.io/data-migrators/gitlab-compliance
+  ComplianceFatalTags: 'fail-upgrade'
+  UPGRADEORACLEVARIANT: 'true'
+# 'true' or 'false'
+  UPGRADEDORACLEVERSION: '12'
+# '11' or '12' (Oracle versions from 12 up to 19, set as '12')
+  PSSPECIALHANDLING: 'true'
+# 'true' or 'false'
+
+diagnostics_115:
+  stage: diagnostics
+  tags:
+    - mettleci
+    - datastage11.5
+  environment: 
+    name: LegacyCI
+  variables:
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+  script:
+    - echo $BaseIISProjectName
+    - echo $DATASTAGE_PROJECT
+    - echo $AgentMettleCmd
+    - echo $IISEngineName
+    - echo $IISUsername
+    - echo $IISPassword
+    - echo $IISProjectTemplateDir
+    - echo $UnitTestPath
+    - echo $AgentMettleCmd
+    - echo $AgentMettleHome
+    - echo $MCIUserName
+    - echo $MCIPassword
+
+diagnostics_117:
+  stage: diagnostics
+  tags:
+    - mettleci
+    - datastage11.7
+  environment: 
+    name: TargetCI
+  variables:
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+  script:
+    - echo ${DATASTAGE_PROJECT}
+    - echo $AgentMettleCmd
+    - echo $IISEngineName
+    - echo $IISUsername
+    - echo $IISPassword
+    - echo $IISProjectTemplateDir
+    - echo $UnitTestPath
+    - echo $AgentMettleCmd
+    - echo $AgentMettleHome
+    - echo $MCIUserName
+    - echo $MCIPassword
+
+
+create_artifact:
+  stage: create_dsparams_diff_artifact
+  tags:
+    - mettleci
+    - datastage11.5
+  environment: 
+    name: LegacyCI
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+  script:
+    - >
+      & $AgentMettleCmd remote download 
+      -host $IISEngineName 
+      -username $MCIUsername -password $MCIPassword 
+      -source $IISProjectTemplateDir/ 
+      -destination $CI_PROJECT_DIR/templates/ 
+      -transferPattern "DSParams"
+    - >
+      if (!(Test-Path -PathType container $CI_PROJECT_DIR\artifacts)) {
+        New-Item -ItemType Directory -Path $CI_PROJECT_DIR\artifacts
+      }
+    - >
+      & $AgentMettleCmd dsparams diff 
+      -before $CI_PROJECT_DIR/templates/DSParams 
+      -after $CI_PROJECT_DIR/datastage/DSParams 
+      -diff $CI_PROJECT_DIR/artifacts/DSParams.diff
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/artifacts/DSParams.diff
+
+    
+deploy_legacy_ci:
+  stage: deploy_legacy_ci
+  tags:
+    - mettleci
+    - datastage11.5
+  environment: 
+    name: LegacyCI
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+    UpdateDSParams: 'false'
+  script:
+    - !reference [.mci_deploy, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/log/**/mettleci_compilation.xml
+    reports:
+      junit: $CI_PROJECT_DIR/log/**/mettleci_compilation.xml
+
+compliance_legacy_ci:errors:
+  stage: compliance_legacy_ci
+  tags:
+    - mettleci
+    - datastage11.5
+  environment: 
+    name: LegacyCI
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+    IncludeTags: ${ComplianceFatalTags}
+    ExcludeTags: example
+    ComplianceSuite: Errors
+  allow_failure: false
+  script:
+    - !reference [.mci_compliance, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/compliance-reports/compliance_report_$ComplianceSuite.xml
+    reports:
+      junit: $CI_PROJECT_DIR/compliance-reports/compliance_report_$ComplianceSuite.xml
+
+compliance_legacy_ci:warnings:
+  stage: compliance_legacy_ci
+  tags:
+    - mettleci
+    - datastage11.5
+  environment: 
+    name: LegacyCI
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+    IncludeTags: \"*\"
+    ExcludeTags: example,${ComplianceFatalTags}
+    ComplianceSuite: Warnings
+  allow_failure: true
+  script:
+    - !reference [.mci_compliance, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/compliance-reports/compliance_report_$ComplianceSuite.xml
+    reports:
+      junit: $CI_PROJECT_DIR/compliance-reports/compliance_report_$ComplianceSuite.xml
+
+unittest_legacy_ci:
+  stage: unittest_legacy_ci
+  tags:
+    - mettleci
+    - datastage11.5
+  environment: 
+    name: LegacyCI
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+  script:
+    - !reference [.mci_unittest, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/unittest-reports/$DATASTAGE_PROJECT/**/*.xml
+    reports:
+      junit: $CI_PROJECT_DIR/unittest-reports/$DATASTAGE_PROJECT/**/*.xml
+
+
+deploy_target_ci:
+  stage: deploy_target_ci
+  tags:
+    - mettleci
+    - datastage11.7
+  environment: 
+    name: TargetCI
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+    UpdateDSParams: 'true'
+  script:
+    - !reference [.mci_deploy, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/log/compilation/**/mettleci_compilation.xml
+    reports:
+      junit: $CI_PROJECT_DIR/log/compilation/**/mettleci_compilation.xml
+
+ccmt_target_ci:
+  stage: ccmt_target_ci
+  tags:
+    - mettleci
+    - datastage11.7
+  environment: 
+    name: TargetCI
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+  script:
+    - !reference [.mci_ccmt, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/log/ccmt/**/mettleci_compilation.xml
+    reports:
+      junit: $CI_PROJECT_DIR/log/ccmt/**/mettleci_compilation.xml
+
+unittest_target_ci:
+  stage: unittest_target_ci
+  tags:
+    - mettleci
+    - datastage11.7
+  environment: 
+    name: TargetCI
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+  script:
+    - !reference [.mci_unittest, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/unittest-reports/$DATASTAGE_PROJECT/**/*.xml
+    reports:
+      junit: $CI_PROJECT_DIR/unittest-reports/$DATASTAGE_PROJECT/**/*.xml
+
+
+deploy_target_qa:
+  stage: deploy_target_qa
+  tags:
+    - mettleci
+    - datastage11.7
+  environment: 
+    name: TargetQA
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+    UpdateDSParams: 'true'
+  script:
+    - !reference [.mci_deploy, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/log/compilation/**/mettleci_compilation.xml
+    reports:
+      junit: $CI_PROJECT_DIR/log/compilation/**/mettleci_compilation.xml
+  when: manual
+  allow_failure: false
+
+
+ccmt_target_qa:
+  stage: ccmt_target_qa
+  tags:
+    - mettleci
+    - datastage11.7
+  environment: 
+    name: TargetQA
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+  script:
+    - !reference [.mci_ccmt, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/log/ccmt/**/mettleci_compilation.xml
+    reports:
+      junit: $CI_PROJECT_DIR/log/ccmt/**/mettleci_compilation.xml
+
+
+deploy_target_perf:
+  stage: deploy_target_perf
+  tags:
+    - mettleci
+    - datastage11.7
+  environment: 
+    name: TargetPERF
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+    UpdateDSParams: 'true'
+  script:
+    - !reference [.mci_deploy, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/log/compilation/**/mettleci_compilation.xml
+    reports:
+      junit: $CI_PROJECT_DIR/log/compilation/**/mettleci_compilation.xml
+  when: manual
+  allow_failure: false
+
+ccmt_target_perf:
+  stage: ccmt_target_perf
+  tags:
+    - mettleci
+    - datastage11.7
+  environment: 
+    name: TargetPERF
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+  script:
+    - !reference [.mci_ccmt, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/log/ccmt/**/mettleci_compilation.xml
+    reports:
+      junit: $CI_PROJECT_DIR/log/ccmt/**/mettleci_compilation.xml
+
+
+deploy_target_prod:
+  stage: deploy_target_prod
+  tags:
+    - mettleci
+    - datastage11.7
+  environment: 
+    name: TargetPROD
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+    UpdateDSParams: 'true'
+  script:
+    - !reference [.mci_deploy, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/log/compilation/**/mettleci_compilation.xml
+    reports:
+      junit: $CI_PROJECT_DIR/log/compilation/**/mettleci_compilation.xml
+  when: manual
+  allow_failure: false
+
+ccmt_target_prod:
+  stage: ccmt_target_prod
+  tags:
+    - mettleci
+    - datastage11.7
+  environment: 
+    name: TargetPROD
+  variables:
+    # Set the name of the DataStage target project for this environment
+    DATASTAGE_PROJECT: '${BaseIISProjectName}_${ENVID}'
+  script:
+    - !reference [.mci_ccmt, script]
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/log/ccmt/**/mettleci_compilation.xml
+    reports:
+      junit: $CI_PROJECT_DIR/log/ccmt/**/mettleci_compilation.xml

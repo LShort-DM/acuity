@@ -1,0 +1,526 @@
+# MettleCI Azure Upgrade pipeline
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - main
+
+#
+# Project-related variables
+#
+# Values enclosed in <...> are placeholders (eg: <BASE_PROJECT_NAME>), and describe the 
+# information required.
+variables:
+  - name: BaseIISProjectName
+    value: <BASE_PROJECT_NAME>
+  - name: ComplianceRepoName
+    value: ADO-Compliance
+  - name: ComplianceFatalTags
+    value: 'fail-upgrade'
+  - name: PS_SpecialHandling
+    value: true
+
+# Reference to the Compliance Rule Repository
+# Due to a convergenbce of limitations with Azure dynamically referencing repositories, either
+# - Name the compliance rules repository "ADO-Compliance"
+# or
+# - Edit the following definition
+# Note: The value of the variable ComplianceRepoName defined above must also be updated to the chosen repository name.
+resources:
+  repositories:
+  - repository: Compliance
+    type: git
+    name: ADO-Compliance
+
+stages:
+
+#------------------------------------------------------------------------------
+- stage: Diagnostics
+
+  jobs:
+  - job: Diagnostics115
+    pool:
+      name: AWS DataStage Agents
+      demands:
+      - MettleCI.CLI
+      - DataStage.Version -equals 11.5
+    variables:
+      - group: demo115_NONPROD
+      - name: EnvID
+        value: "lci"
+      - name: Datastage_Project
+        value: ${{ variables.BaseIISProjectName }}_${{ variables.EnvID }}
+    steps:
+    - script: |
+        echo "Diagnostics - 11.5 Non-Production Variable Group"
+        echo "IISUsername: $(IISUsername)"
+        echo "IISPassword: $(IISPassword)"
+        echo "IISDomainName: $(IISDomainName)"
+        echo "IISEngineName: $(IISEngineName)"
+        echo "EnvID: $(EnvID)"
+        echo "BaseIISProjectName: ${{ variables.BaseIISProjectName }}"
+        echo "DatastageProject: ${{ variables.Datastage_Project }}"
+        echo "ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}"
+        echo "IISUsername: $(IISUsername)"
+        echo "IISPassword: $(IISPassword)"
+        echo "MCIUsername: $(MCIUsername)"
+        echo "MCIPassword: $(MCIPassword)"
+        echo "AgentMettleCmd: $(AgentMettleCmd)"
+        echo "ADOProject: $(System.TeamProject)"
+        echo "SourceRepo: $(Build.Repository.Name)"
+        echo "Agent.Name: $(Agent.Name)"
+      displayName: 'Diagnostics v11.5'
+    - script: env | sort
+      displayName: "Get envirnment variables"
+
+  - job: Diagnostics117
+    pool:
+      name: AWS DataStage Agents
+      demands:
+      - MettleCI.CLI
+      - DataStage.Version -equals 11.7
+    variables:
+      - group: demo117_NONPROD
+      - name: EnvID
+        value: "ci"
+      - name: Datastage_Project
+        value: ${{ variables.BaseIISProjectName }}_${{ variables.EnvID }}
+    steps:
+    - script: |
+        echo "Diagnostics - 11.7 Non-Production Variable Group"
+        echo "IISUsername: $(IISUsername)"
+        echo "IISPassword: $(IISPassword)"
+        echo "IISDomainName: $(IISDomainName)"
+        echo "IISEngineName: $(IISEngineName)"
+        echo "BaseIISProjectName: ${{ variables.BaseIISProjectName }}"
+        echo "DatastageProject: ${{ variables.Datastage_Project }}"
+        echo "ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}"
+        echo "IISUsername: $(IISUsername)"
+        echo "IISPassword: $(IISPassword)"
+        echo "MCIUsername: $(MCIUsername)"
+        echo "MCIPassword: $(MCIPassword)"
+        echo "AgentMettleCmd: $(AgentMettleCmd)"
+        echo "ADOProject: $(System.TeamProject)"
+        echo "SourceRepo: $(Build.Repository.Name)"
+        echo "Agent.Name: $(Agent.Name)"
+      displayName: 'Diagnostics v11.7'
+
+
+#------------------------------------------------------------------------------
+- stage: Create_DSParams_Diff_Artifact
+  variables:
+    - group: demo115_NONPROD
+    - name: EnvID
+      value: "lci"
+
+  pool:
+    name: AWS DataStage Agents
+    demands:
+    - MettleCI.CLI
+    - DataStage.Version -equals 11.5
+
+  jobs:
+  - job:
+    displayName: "Create DSParams Diff Artifact"
+    steps:
+    - checkout: self
+    - script:
+        $(AgentMettleCmd) remote download -host $(IISEngineName) ^
+          -username $(MCIUsername) -password $(MCIPassword) ^
+          -source $(IISProjectTemplateDir)/ ^
+          -destination $(System.DefaultWorkingDirectory)/templates/ ^
+          -transferPattern "DSParams" 
+      displayName: 'Fetch Template DSParams'
+    - script: |
+        if not exist artifacts mkdir artifacts
+      displayName: 'Create artifacts dir'  
+    - script:
+        $(AgentMettleCmd) dsparams diff ^
+          -before $(System.DefaultWorkingDirectory)/templates/DSParams ^
+          -after datastage/DSParams ^
+          -diff $(System.DefaultWorkingDirectory)/artifacts/DSParams.diff
+      displayName: 'Generate diff'
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifact: $(Build.BuildNumber) DSParams.diff'
+      inputs:
+        PathToPublish: $(System.DefaultWorkingDirectory)\artifacts
+        ArtifactName: 'Diffs'
+      timeoutInMinutes: 10
+
+
+#------------------------------------------------------------------------------
+- stage: Deploy_Legacy_CI
+  variables:
+    - group: demo115_NONPROD
+    - name: EnvID
+      value: "lci"
+    - name: Datastage_Project
+      value: ${{ variables.BaseIISProjectName }}_${{ variables.EnvID }}
+
+  pool:
+    name: AWS DataStage Agents
+    demands:
+    - MettleCI.CLI
+    - DataStage.Version -equals 11.5
+
+  jobs:
+  - template: deploy-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Legacy - Continuous Integration
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      MCIUsername: $(MCIUsername)
+      MCIPassword: $(MCIPassword)
+      PublishCompilationTests: true
+      mettlecicmd: $(AgentMettleCmd)
+      MettleHomeDir: $(AgentMettleHome)
+      UpdateDSParams: false
+      PSSpecialHandling: ${{ variables.PS_SpecialHandling }}
+
+
+#------------------------------------------------------------------------------
+- stage: Test_Legacy_CI
+  variables:
+    - group: demo115_NONPROD
+    - name: EnvID
+      value: "lci"
+    - name: Datastage_Project
+      value: ${{ variables.BaseIISProjectName }}_${{ variables.EnvID }}
+
+  pool:
+    name: AWS DataStage Agents
+    demands:
+    - MettleCI.CLI
+    - DataStage.Version -equals 11.5  
+
+  jobs:
+  - template: compliance-template.yml
+    parameters:
+      ProjectName: ${{ variables.BaseIISProjectName }}
+      ComplianceSuite: Legacy CI WARN
+      ComplianceRepoName: ${{ variables.ComplianceRepoName }}
+      SourceRepoName: $(Build.Repository.Name)
+      IncludeTags: ''
+      ExcludeTags: ${{ variables.ComplianceFatalTags }}
+      ContinueOnError: true
+      mettlecicmd: $(AgentMettleCmd)
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+
+  - template: compliance-template.yml
+    parameters:
+      ProjectName: ${{ variables.BaseIISProjectName }}
+      ComplianceSuite: Legacy CI FATAL
+      ComplianceRepoName: ${{ variables.ComplianceRepoName }}
+      SourceRepoName: $(Build.Repository.Name)
+      IncludeTags: ${{ variables.ComplianceFatalTags }}
+      ExcludeTags: ''
+      ContinueOnError: false
+      mettlecicmd: $(AgentMettleCmd)
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+
+  - template: unittest-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Source
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      MCIUsername: $(MCIUsername)
+      MCIPassword: $(MCIPassword)
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      mettlecicmd: $(AgentMettleCmd)
+      unittestpath: $(EngineUnitTestBaseDir)
+
+#------------------------------------------------------------------------------
+- stage: Deploy_Target_CI
+  variables:
+    - group: demo117_NONPROD
+    - name: EnvID
+      value: "ci"
+    - name: Datastage_Project
+      value: ${{ variables.BaseIISProjectName }}_${{ variables.EnvID }}
+
+  pool:
+    name: AWS DataStage Agents
+    demands:
+    - MettleCI.CLI
+    - DataStage.Version -equals 11.7
+
+  jobs:
+  - template: deploy-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Upgrade Target - Continuous Integration
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      MCIUsername: $(MCIUsername)
+      MCIPassword: $(MCIPassword)
+      PublishCompilationTests: true
+      mettlecicmd: $(AgentMettleCmd)
+      ProjectTemplate: $(IISProjectTemplateDir)
+      MettleHomeDir: $(AgentMettleHome)
+      UpdateDSParams: true
+      PSSpecialHandling: ${{ variables.PS_SpecialHandling }}
+
+  - template: ccmt-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Upgrade Target - Continuous Integration
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      PublishCompilationTests: true
+      mettlecicmd: $(AgentMettleCmd)
+      MettleHomeDir: $(AgentMettleHome)
+      UpgradeOracleVariant: true
+      DependsOn: Deploy_${{ variables.EnvID }}
+
+#------------------------------------------------------------------------------
+- stage: Test_Target_CI
+  variables:
+    - group: demo117_NONPROD
+    - name: EnvID
+      value: "ci"
+    - name: Datastage_Project
+      value: ${{ variables.BaseIISProjectName }}_${{ variables.EnvID }}
+
+  pool:
+    name: AWS DataStage Agents
+    demands:
+    - MettleCI.CLI
+    - DataStage.Version -equals 11.7
+
+  jobs:
+  - template: unittest-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Upgrade
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      MCIUsername: $(MCIUsername)
+      MCIPassword: $(MCIPassword)
+      mettlecicmd: $(AgentMettleCmd)
+      unittestpath: $(EngineUnitTestBaseDir)
+
+#------------------------------------------------------------------------------
+- stage: Deploy_Target_Dev
+  variables:
+    - group: demo117_NONPROD
+    - name: EnvID
+      value: "dev"
+    - name: Datastage_Project
+      value: ${{ variables.BaseIISProjectName }}_${{ variables.EnvID }}
+
+  pool:
+    name: AWS DataStage Agents
+    demands:
+    - MettleCI.CLI
+    - DataStage.Version -equals 11.7
+
+  jobs:
+  - template: deploy-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Upgrade Target - Development
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      MCIUsername: $(MCIUsername)
+      MCIPassword: $(MCIPassword)
+      PublishCompilationTests: true
+      mettlecicmd: $(AgentMettleCmd)
+      ProjectTemplate: $(IISProjectTemplateDir)
+      MettleHomeDir: $(AgentMettleHome)
+      UpdateDSParams: true
+      PSSpecialHandling: ${{ variables.PS_SpecialHandling }}
+
+  - template: ccmt-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Upgrade Target - Development
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      PublishCompilationTests: true
+      mettlecicmd: $(AgentMettleCmd)
+      MettleHomeDir: $(AgentMettleHome)
+      UpgradeOracleVariant: true
+      DependsOn: Deploy_${{ variables.EnvID }}
+
+#------------------------------------------------------------------------------
+- stage: Deploy_Target_QA
+  variables:
+    - group: demo117_NONPROD
+    - name: EnvID
+      value: "qa"
+    - name: Datastage_Project
+      value: ${{ variables.BaseIISProjectName }}_${{ variables.EnvID }}
+
+  pool:
+    name: AWS DataStage Agents
+    demands:
+    - MettleCI.CLI
+    - DataStage.Version -equals 11.7
+
+  jobs:
+  - template: deploy-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Upgrade Target - Quality Assurance
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      MCIUsername: $(MCIUsername)
+      MCIPassword: $(MCIPassword)
+      PublishCompilationTests: true
+      mettlecicmd: $(AgentMettleCmd)
+      ProjectTemplate: $(IISProjectTemplateDir)
+      MettleHomeDir: $(AgentMettleHome)
+      UpdateDSParams: true
+      PSSpecialHandling: ${{ variables.PS_SpecialHandling }}
+
+  - template: ccmt-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Upgrade Target - Quality Assurance
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      PublishCompilationTests: true
+      mettlecicmd: $(AgentMettleCmd)
+      MettleHomeDir: $(AgentMettleHome)
+      UpgradeOracleVariant: true
+      DependsOn: Deploy_${{ variables.EnvID }}
+
+#------------------------------------------------------------------------------
+- stage: Deploy_Target_Perf
+  variables:
+    - group: demo117_PROD
+    - name: EnvID
+      value: "perf"
+    - name: Datastage_Project
+      value: ${{ variables.BaseIISProjectName }}_${{ variables.EnvID }}
+
+  pool:
+    name: AWS DataStage Agents
+    demands:
+    - MettleCI.CLI
+    - DataStage.Version -equals 11.7
+
+  jobs:
+  - template: deploy-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Upgrade Target - Production
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      MCIUsername: $(MCIUsername)
+      MCIPassword: $(MCIPassword)
+      PublishCompilationTests: true
+      mettlecicmd: $(AgentMettleCmd)
+      ProjectTemplate: $(IISProjectTemplateDir)
+      MettleHomeDir: $(AgentMettleHome)
+      UpdateDSParams: true
+      PSSpecialHandling: ${{ variables.PS_SpecialHandling }}
+
+  - template: ccmt-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Upgrade Target - Production
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      PublishCompilationTests: true
+      mettlecicmd: $(AgentMettleCmd)
+      MettleHomeDir: $(AgentMettleHome)
+      UpgradeOracleVariant: true
+      DependsOn: Deploy_${{ variables.EnvID }}
+
+#------------------------------------------------------------------------------
+- stage: Deploy_Target_Prod
+  variables:
+    - group: demo117_PROD
+    - name: EnvID
+      value: "prod"
+    - name: Datastage_Project
+      value: ${{ variables.BaseIISProjectName }}_${{ variables.EnvID }}
+
+  pool:
+    name: AWS DataStage Agents
+    demands:
+    - MettleCI.CLI
+    - DataStage.Version -equals 11.7
+
+  jobs:
+  - template: deploy-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Upgrade Target - Production
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      MCIUsername: $(MCIUsername)
+      MCIPassword: $(MCIPassword)
+      PublishCompilationTests: true
+      mettlecicmd: $(AgentMettleCmd)
+      ProjectTemplate: $(IISProjectTemplateDir)
+      MettleHomeDir: $(AgentMettleHome)
+      UpdateDSParams: true
+      PSSpecialHandling: ${{ variables.PS_SpecialHandling }}
+
+  - template: ccmt-template.yml
+    parameters:
+      DomainName: $(IISDomainName)
+      EngineName: $(IISEngineName)
+      EnvironmentID: ${{ variables.EnvID }}
+      EnvironmentName: Upgrade Target - Production
+      DatastageProject: ${{ variables.Datastage_Project }}
+      ProjectCacheDir: $(AgentMettleHome)\cache\$(IISEngineName)\${{ variables.Datastage_Project }}
+      IISUsername: $(IISUsername)
+      IISPassword: $(IISPassword)
+      PublishCompilationTests: true
+      mettlecicmd: $(AgentMettleCmd)
+      MettleHomeDir: $(AgentMettleHome)
+      UpgradeOracleVariant: true
+      DependsOn: Deploy_${{ variables.EnvID }}

@@ -1,0 +1,139 @@
+name: MettleCI Unit Test Template
+
+on:
+  workflow_call:
+    inputs:
+      RunOn:
+        required: true
+        type: string
+      EnvironmentName:
+        description: ''
+        required: true
+        type: string
+      EnvID:
+        required: true
+        type: string
+      IISDomainName:
+        description: ''
+        required: true
+        type: string
+      IISEngineName:
+        description: ''
+        required: true
+        type: string
+      DatastageProject:
+        description: ''
+        required: true
+        type: string
+      ProjectCacheDir:
+        description: ''
+        required: true
+        type: string
+      IISUsername:
+        description: ''
+        required: true
+        type: string
+      MCIUsername:
+        description: ''
+        required: true
+        type: string
+      AgentMettleCmd:
+        required: true
+        type: string
+      UnitTestPath:
+        required: true
+        type: string
+    secrets:
+      IISPASSWORD:
+        description: 'The IIS user password'
+        required: true
+      MCIPASSWORD:
+        description: 'The MettleCI user password'
+        required: true
+
+permissions:
+  contents: read
+  checks: write
+
+defaults:
+  run:
+    shell: cmd
+
+jobs: 
+  Compliance_Test:
+    runs-on: ${{ fromJSON(inputs.RunOn) }}
+    environment: ${{ inputs.EnvironmentName }}
+    env:
+      DATASTAGE_PROJECT: ${{ inputs.DatastageProject }}
+      ENVID: ${{ inputs.EnvID }}
+      IISENGINENAME: ${{ inputs.IISEngineName }}
+      ENGINEUNITTESTBASEDIR: ${{ inputs.UnitTestPath }}
+    steps:
+
+      # Use our DataStage repository
+      - name: Checkout Project Repo
+        uses: actions/checkout@master
+
+      - name: 'Configure Properties'
+        run: |
+          ${{ inputs.AgentMettleCmd }} properties config ^
+            -baseDir ${{ github.workspace }}/datastage ^
+            -filePattern "cleanup_unittest.sh" ^
+            -properties var.${{ inputs.EnvID }} ^
+            -outDir ${{ github.workspace }}/config
+
+      - name: 'Cleanup'
+        run: |
+          ${{ inputs.AgentMettleCmd }} remote execute ^
+            -host ${{ inputs.IISEngineName }} ^
+            -username ${{ inputs.MCIUsername }} -password ${{ secrets.MCIPASSWORD }} ^
+            -script "${{ github.workspace }}/config/cleanup_unittest.sh"
+
+      - name: 'Upload unit test specs'
+        run: |
+          ${{ inputs.AgentMettleCmd }} remote upload ^
+            -host ${{ inputs.IISEngineName }} ^
+            -username ${{ inputs.MCIUsername }} -password ${{ secrets.MCIPASSWORD }} ^
+            -source "${{ github.workspace }}/unittest" ^
+            -transferPattern "**/*" ^
+            -destination ${{ inputs.UnitTestPath }}/specs/${{ inputs.DatastageProject }}
+
+      - name: 'Create unit test report dir'
+        run: |
+          cd ${{ github.workspace }}
+          mkdir "unittest-reports"
+
+      - name: 'Run Unit Tests'
+        run: |
+          ${{ inputs.AgentMettleCmd }} unittest test ^
+            -domain ${{ inputs.IISDomainName }} ^
+            -server ${{ inputs.IISEngineName }} ^
+            -username ${{ inputs.IISUsername }} -password ${{ secrets.IISPASSWORD }} ^
+            -project ${{ inputs.DatastageProject }} ^
+            -specs ${{ github.workspace }}/unittest ^
+            -reports ${{ github.workspace }}/unittest-reports ^
+            -project-cache ${{ inputs.ProjectCacheDir }} ^
+            -test-suite "MettleCI Unit Tests - ${{ inputs.EnvironmentName }}"
+
+      - name: 'Download unit test reports'
+        run: |
+          ${{ inputs.AgentMettleCmd }} remote download ^
+            -host ${{ inputs.IISEngineName }} ^
+            -source ${{ inputs.UnitTestPath }}/reports ^
+            -destination ${{ github.workspace }}/unittest-reports ^
+            -transferPattern "${{ inputs.DatastageProject }}/**/*.xml" ^
+            -username ${{ inputs.MCIUsername }} -password ${{ secrets.MCIPASSWORD }}
+
+      - name: Check For Test Results
+        id: set-fileExists
+        run: echo fileExists=Test-Path -Path "${{ github.workspace }}/unittest-reports/**/*.xml">> %GITHUB_OUTPUT%
+
+      - name: 'Publish unit test results'
+        if: (${{ steps.set-fileExists.outputs.fileExists }} == true)
+        uses: mikepenz/action-junit-report@v3
+        with:
+          report_paths: "${{ github.workspace }}/unittest-reports/**/*.xml"
+          require_tests: false
+          fail_on_failure: false
+          check_name: "MettleCI Unit Tests"
+          summary: true

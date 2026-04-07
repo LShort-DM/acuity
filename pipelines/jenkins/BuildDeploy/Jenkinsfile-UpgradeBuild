@@ -1,0 +1,311 @@
+// Jenkins MettleCI Upgrade Pipeline - Build Phase, Data Migrators
+//
+//  +--------+   +-------------+   +------------+  |   +--------+   +--------+   +--------+
+//  |        |   |     CI      |   |     CI     |  |   |        |   |        |   |        |
+//  |  DEV   +--->  (LEGACY)   +--->  (TARGET)  +--+--->   QA   +--->  PERF  +--->  PROD  |
+//  +--------+   +-------------+   +------------+  |   +--------+   +--------+   +--------+
+//                                                 |
+//  ------------------ Build --------------------->|-----Deploy-->|---Deploy-->|---Deploy-->|
+//                                   (release-x)   |     (qa-x)      (perf-x)     (prod-x)
+//                                                 |
+//
+// When code is checked into the repository, it automatically triggers the Build pipeline, 
+// which upon success tags the repository as a viable candidate for deployment to other
+// environments.
+//
+// The Deployment pipeline manages the deployment of a selected tag into a target environment, and is
+// executed manually.
+//
+// Further detail regarding the creation and use of repository tags in this CI/CD process is located at
+// <confluence link>
+
+// In Jenkins configuration, under Jenkins -> Manage Jenkins -> Configure System -> Global Pipeline Libraries,
+// add a reference to the Jenkins MCI Shared Libraries, giving it the name "jenkins-mci-shared-libraries"
+// Doing that allows this line to reference that shared library and use the MettleCI step types
+@Library('jenkins-mci-shared-libraries') _
+
+pipeline {
+  	agent none
+
+    environment {
+        // Values enclosed in <...> are placeholders (eg: <BASE_PROJECT_NAME>), and describe the 
+        // information required to placed inside the single quotes.
+        IIS_BASE_PROJECT_NAME = '<BASE_PROJECT_NAME>'
+        COMPLIANCE_REPO_CREDENTIALS = '<JENKINS_COMPLIANCE_CREDENTIAL_ID>'
+        COMPLIANCE_REPO_URL = '<COMPLIANCE_REPOSITORY_URL>'
+        COMPLIANCE_FAIL_TAG = 'fail-ci'
+        
+        UPGRADE_ORACLE_VARIANT = true
+        UPGRADED_ORACLE_VERSION = 12
+
+        PS_SPECIALHANDLING = true
+
+        TAG_EMAIL = '<EMAIL>'
+        TAG_USER = '<USERNAME>'
+    }
+
+    stages {
+        stage("Diagnostics 11.5") {
+            agent {
+                label 'mettleci && datastage11.5'
+            }
+            environment {
+                ENVID = "lci"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    bat label: 'Diags - 115',
+                      	returnStdout: false,
+                        script: """
+                            echo Diagnostics - 11.5 Non-Production
+                            echo IISUsername: %IISUSERNAME%
+                            echo IISPassword: %IISPASSWORD%
+                            echo IISDomainName: %IISDOMAINNAME%
+                            echo IISEngineName: %IISENGINENAME%
+                            echo EnvID: %ENVID%
+                            echo BaseIISProjectName: %IIS_BASE_PROJECT_NAME%
+                            echo DatastageProject: %DATASTAGE_PROJECT%
+                            echo ProjectCacheDir: %AGENTMETTLEHOME%\\cache\\%IISENGINENAME%\\%DATASTAGE_PROJECT%
+                            echo MCIUsername: %MCIUSERNAME%
+                            echo MCIPassword: %MCIPASSWORD%
+                            echo AgentMettleCmd: %AGENTMETTLEHOME%
+                            echo Agent Name: %NODE_NAME%
+                        """
+                }
+            }
+        }
+
+        stage("Diagnostics 11.7") {
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            environment {
+                ENVID = "ci"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    bat label: 'Diags 117', 
+                        script: '''
+                            echo Diagnostics - 11.5 Non-Production
+                            echo IISUsername: %IISUSERNAME%
+                            echo IISPassword: %IISPASSWORD%
+                            echo IISDomainName: %IISDOMAINNAME%
+                            echo IISEngineName: %IISENGINENAME%
+                            echo EnvID: %ENVID%
+                            echo BaseIISProjectName: %IIS_BASE_PROJECT_NAME%
+                            echo DatastageProject: %DATASTAGE_PROJECT%
+                            echo ProjectCacheDir: %AGENTMETTLEHOME%\\cache\\%IISENGINENAME%\\%DATASTAGE_PROJECT%
+                            echo MCIUsername: %MCIUSERNAME%
+                            echo MCIPassword: %MCIPASSWORD%
+                            echo AgentMettleCmd: %AGENTMETTLEHOME%
+                            echo Agent Name: %NODE_NAME%
+                        '''
+
+                }
+            }
+        }
+
+        stage("Create DSParams Diff Artifact") {
+            agent {
+                label 'mettleci && datastage11.5'
+            }
+            environment {
+                ENVID = "lci"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    bat label: "Fetch Template DSParams",
+                        script: '''
+                            %AGENTMETTLECMD% remote download -host %IISENGINENAME% ^
+                            -username %MCIUSERNAME% -password %MCIPASSWORD% ^
+                            -source %IISPROJECTTEMPLATEDIR%/ ^
+                            -destination templates/ ^
+                            -transferPattern "DSParams" 
+                        '''
+
+                    bat label: "Create artifacts directory",
+                        script: "if not exist artifacts mkdir artifacts"
+
+                    bat label: "Generate diff",
+                        script: '''
+                            %AGENTMETTLECMD% dsparams diff ^
+                            -before templates/DSParams ^
+                            -after datastage/DSParams ^
+                            -diff artifacts/DSParams.diff
+                        '''
+
+                    dir('artifacts'){
+                        stash includes: "DSParams.diff", name: 'Diffs'
+                    }
+                }
+            }
+        }
+
+        stage("Deploy - Legacy CI") {
+            agent {
+                label 'mettleci && datastage11.5'
+            }
+            environment {
+                ENVID = "lci"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+                UPGRADE_DSPARAMS = false
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    mci_deploy(
+                        true,
+                        UPGRADE_DSPARAMS,
+                        PS_SPECIALHANDLING
+                    )
+                }
+            }
+        }
+
+        stage('Test - Legacy CI') {                    
+            agent {
+                label 'mettleci && datastage11.5'
+            }
+            environment {
+                ENVID = "lci"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    mci_compliance(
+                        env.COMPLIANCE_REPO_CREDENTIALS,
+                        env.COMPLIANCE_REPO_URL,
+                        "",                             // Include tags
+                        env.COMPLIANCE_FAIL_TAG,        // Exclude tags
+                        "Warnings",
+                        true
+                    )
+
+                    mci_compliance(
+                        env.COMPLIANCE_REPO_CREDENTIALS,
+                        env.COMPLIANCE_REPO_URL,
+                        env.COMPLIANCE_FAIL_TAG,        // Include tags
+                        "",                             // Exclude tags
+                        "Errors",
+                        false
+                    )
+
+                    mci_unittest(
+                        "Legacy CI"
+                    )
+                }
+            }
+        } 
+
+        stage('Deploy - Target') {
+            agent {
+                label "mettleci && datastage11.7"
+            }
+            environment {
+                ENVID = "ci"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+                UPGRADE_DSPARAMS = true
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    mci_deploy(
+                        true,
+                        UPGRADE_DSPARAMS,
+                        PS_SPECIALHANDLING
+                    )
+
+                    mci_ccmt(
+                    true,
+                        UPGRADE_ORACLE_VARIANT,
+                        UPGRADED_ORACLE_VERSION
+                    )
+                }
+            }
+        }
+
+        stage('Test - Target CI') {                    
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            environment {
+                ENVID = "ci"
+
+                // Set the name of the DataStage target project for this environment
+                DATASTAGE_PROJECT = "${env.IIS_BASE_PROJECT_NAME}_${env.ENVID}"
+            }
+
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.IISPASSWORD}", variable: 'IISPASSWORD'),
+                    string(credentialsId: "${env.MCIPASSWORD}", variable: 'MCIPASSWORD')
+                ]) {
+                    mci_unittest(
+                        "Target CI"
+                    )
+                }
+            }
+        }
+
+        stage('Success - Tag Repository') {
+            agent {
+                label 'mettleci && datastage11.7'
+            }
+            steps {
+                withCredentials([
+                    gitUsernamePassword(credentialsId: scm.getUserRemoteConfigs()[0].getCredentialsId())
+                ]) {
+                    // Tag this version of the repository with a "release" tag to make this a candidate
+                    // for promotion into the first of the target environments.
+                    bat label: 'Tag current build',
+                        script: """
+                            git config user.email \"${TAG_EMAIL}\"
+                            git config user.name \"${TAG_USER}\"
+                            git tag -a release-${env.BUILD_NUMBER} -m \"${env.JOB_BASE_NAME}: build ${env.BUILD_NUMBER} succeeded\"
+                            git push origin --tags
+                        """
+                }
+            }
+        }
+    }
+}
+
+
+

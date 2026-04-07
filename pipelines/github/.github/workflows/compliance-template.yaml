@@ -1,0 +1,133 @@
+name: MettleCI Compliance Template
+
+on:
+  workflow_call:
+    inputs:
+      RunOn:
+        required: true
+        type: string
+      EnvironmentName:
+        required: true
+        type: string
+      ComplianceSuite:
+        required: true
+        type: string
+      ComplianceRepoName:
+        required: true
+        type: string
+      IncludeTags:
+        required: false
+        type: string
+        default: ''
+      ExcludeTags:
+        required: false
+        type: string
+        default: ''
+      DatastageProject:
+        required: true
+        type: string
+      ProjectCacheDir:
+        description: ''
+        required: true
+        type: string
+      AgentMettleCmd:
+        required: true
+        type: string
+      ContinueOnError:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      PAT:
+        required: true
+
+permissions:
+  contents: read
+  checks: write
+
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+  # Diagnostics:
+  #   runs-on: ${{ fromJSON(inputs.RunOn) }}
+  #   steps:
+  #     - name: Print environment variables
+  #       run: |
+  #         echo "Github workspace directory: ${{ github.workspace }}"
+  #         echo "EnvironmentName: ${{ inputs.EnvironmentName }}"
+  #         echo "ComplianceSuite: ${{ inputs.ComplianceSuite }}"
+  #         echo "ComplianceRepoName: ${{ inputs.ComplianceRepoName }}"
+  #         echo "RulesDir: ${{ inputs.RulesDir }}"
+  #         echo "DatastageProject: ${{ inputs.DatastageProject }}"
+  #         echo "ProjectCacheDir: ${{ inputs.ProjectCacheDir }}"
+  #         echo "AgentMettleCmd: ${{ inputs.AgentMettleCmd }}"
+  #         echo "ContinueOnError: ${{ inputs.ContinueOnError }}"
+  #         echo "Done!"
+ 
+  Compliance_Test:
+    runs-on: ${{ fromJSON(inputs.RunOn) }}
+    environment: ${{ inputs.EnvironmentName }}
+    env:
+      INCLUDETAGS: ${{ inputs.IncludeTags }}
+      EXCLUDETAGS: ${{ inputs.ExcludeTags }}
+    steps:
+
+      # Use our DataStage repository
+      - name: Checkout Project Repo
+        uses: actions/checkout@master
+
+      # Use our Compliance repository
+      - name: Checkout Compliance Repo
+        uses: actions/checkout@master
+        with:
+          repository: ${{ inputs.ComplianceRepoName }}
+          path: 'compliance'
+          ref: 'main'
+          token: ${{ secrets.PAT }}
+
+      - name: Set included tags
+        id: set-includedTagsOption
+        run: |
+          IF "%INCLUDETAGS%"=="" (
+            echo includedTagsOption=>> %GITHUB_OUTPUT%
+          ) ELSE (
+            echo includedTagsOption=-include-tags %INCLUDETAGS%>> %GITHUB_OUTPUT%
+          )
+
+      - name: Set excluded tags
+        id: set-excludedTagsOption
+        run: |
+          IF "%EXCLUDETAGS%"=="" (
+            echo excludedTagsOption=-exclude-tags example>> %GITHUB_OUTPUT%
+          ) ELSE (
+            echo excludedTagsOption=-exclude-tags example,%EXCLUDETAGS%>> %GITHUB_OUTPUT%
+          )
+
+      - name: 'Run Compliance (${{ inputs.ComplianceSuite }})'
+        run: |
+          ${{ inputs.AgentMettleCmd }} compliance test ^
+            -assets ${{ github.workspace }}/datastage ^
+            -report "compliance-reports/compliance_report_${{ inputs.ComplianceSuite }}.xml" ^
+            -junit ^
+            -rules ${{ github.workspace }}/compliance ^
+            ${{ steps.set-includedTagsOption.outputs.includedTagsOption }} ^
+            ${{ steps.set-excludedTagsOption.outputs.excludedTagsOption }} ^
+            -project-cache ${{ inputs.ProjectCacheDir }} ^
+            -ignore-test-failures ^
+            -test-suite "${{ inputs.ComplianceSuite }}"
+
+      - name: Check For Test Results
+        id: set-fileExists
+        run: echo fileExists=Test-Path -Path "${{ github.workspace }}/compliance-reports/compliance_report_${{ inputs.ComplianceSuite }}.xml">> %GITHUB_OUTPUT%
+
+      - name: 'Publish compliance test ${{ inputs.ComplianceSuite }} results'
+        if: (${{ steps.set-fileExists.outputs.fileExists }} == true)
+        uses: mikepenz/action-junit-report@v3
+        with:
+          report_paths: "${{ github.workspace }}/compliance-reports/compliance_report_${{ inputs.ComplianceSuite }}.xml"
+          require_tests: false
+          fail_on_failure: ${{ inputs.ContinueOnError == false }}
+          check_name: "MettleCI Compliance - ${{ inputs.ComplianceSuite }} rules"
+          summary: true
